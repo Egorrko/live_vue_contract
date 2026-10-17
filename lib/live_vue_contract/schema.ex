@@ -11,6 +11,7 @@ defmodule LiveVueContract.Schema do
   """
 
   @special ~w(id class v-ssr v-diff v-component v-socket v-inject __changed__ __given__ inner_block)
+  # Written by 0.1.0 into the contract itself; skipped when reading an old file.
   @sources "$sources"
 
   @doc "Path of the contract file, relative to the host app's cwd."
@@ -34,14 +35,6 @@ defmodule LiveVueContract.Schema do
 
       _ ->
         %{}
-    end
-  end
-
-  @doc "Hash of the sources the contract file was generated from, or `nil`."
-  def sources do
-    case File.read(path()) do
-      {:ok, json} -> json |> JSON.decode!() |> Map.get(@sources)
-      _ -> nil
     end
   end
 

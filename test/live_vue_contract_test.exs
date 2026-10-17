@@ -97,7 +97,6 @@ defmodule LiveVueContractTest do
     Application.put_env(:live_vue_contract, :contract, path)
 
     try do
-      assert Schema.sources() == "abc"
       assert {:ok, %{"properties" => %{}}} = Schema.fetch("HomePage")
       assert {:ok, %{"properties" => %{"a" => _}}} = Schema.fetch("ui/Dialog")
       assert {:ok, %{"properties" => %{"b" => _}}} = Schema.fetch("prototypes/players/0-freakdex")

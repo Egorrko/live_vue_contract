@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 — 2026-10-17
+
+- The source hash moved from `"$sources"` in the contract to a stamp in the Mix manifest directory
+  (`_build/<env>`); `LiveVueContract.Schema.sources/0` is gone. Old contracts still load.
+- The contract is rewritten only when its schemas change: an edit that leaves props as they were no
+  longer recompiles every `~H` module (they list the contract as an external resource).
+- Sources are the `.vue` files plus the project files the generator actually read prop types from;
+  `:watch` now defaults to `[]` and only adds extra globs. Editing code no prop type touches does not
+  run node.
+- Without `node` and without a stamp, an existing contract is used without a freshness check.
+
 ## 0.1.0 — 2026-09-19
 
 First release.

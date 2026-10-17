@@ -1,13 +1,22 @@
 // Reads `defineProps<T>()` of every .vue file under the given roots via vue-component-meta
 // and writes one JSON file: { "<component name>": <JSON-Schema subset> }.
 // Usage (cwd = host app root, needs node_modules/vue-component-meta):
-//   node gen.mjs tsconfig.json assets/vue/contract.json <sources-hash> assets/vue [more roots...]
-// The hash is recorded under "$sources" so the Mix compiler can tell a fresh file from a stale one.
+//   node gen.mjs tsconfig.json assets/vue/contract.json deps.json assets/vue [more roots...]
+// The contract is rewritten only when its content changes: every `~H` module lists it as an
+// external resource, so a rewrite with the same schemas would recompile them all for nothing.
+// deps.json gets the project files the schemas were read from (the .vue files themselves, prop
+// declarations, every type expanded into a schema): the Mix compiler hashes only these, so an edit
+// to code that no prop type touches does not run this script at all.
 import { createRequire } from "module"
-import { readdirSync, writeFileSync } from "fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs"
 import path from "path"
 
-const [tsconfig, out, hash, ...roots] = process.argv.slice(2)
+const [tsconfig, out, depsOut, ...roots] = process.argv.slice(2)
+const deps = new Set()
+const track = file => {
+  const rel = path.relative(process.cwd(), file)
+  if (!rel.startsWith("..") && !path.isAbsolute(rel) && !rel.split(path.sep).includes("node_modules")) deps.add(rel)
+}
 const require = createRequire(path.resolve("package.json"))
 const { createChecker } = require("vue-component-meta")
 const ts = require("typescript")
@@ -15,7 +24,10 @@ const ts = require("typescript")
 // Types declared only in TypeScript's own lib (DOM, Promise, Map, Date...) never travel over the
 // wire as objects: leave them unexpanded, they become `any` below. Everything else is expanded.
 // Generic instantiations (Array<T>, Partial<T>, Record<K, V>) are still expanded: their shape is ours.
+// The schema resolver asks this for every type it meets, so it is also where deps are collected.
 const fromTsLib = (_name, type, typeChecker) => {
+  for (const sym of [type.aliasSymbol, type.getSymbol()])
+    for (const d of sym?.getDeclarations() ?? []) track(d.getSourceFile().fileName)
   const args = type.aliasTypeArguments ?? (type.objectFlags & ts.ObjectFlags.Reference ? typeChecker.getTypeArguments(type) : [])
   const decls = (type.aliasSymbol ?? type.getSymbol())?.getDeclarations() ?? []
   return args.length === 0 && decls.length > 0 &&
@@ -72,6 +84,7 @@ function object(props, seen) {
   const properties = {}
   const required = []
   for (const p of props) {
+    for (const d of p.getDeclarations?.() ?? []) track(d.file)
     properties[p.name] = toSchema(p.schema, seen)
     if (p.required) required.push(p.name)
   }
@@ -92,9 +105,13 @@ for (const root of roots) {
     const name = path.relative(root, file).replace(/\.vue$/, "")
     const props = checker.getComponentMeta(path.resolve(file)).props.filter(p => !p.global)
     contract[name] = object(props, new Set())
+    track(file)
   }
 }
 
-const sorted = Object.fromEntries([["$sources", hash], ...Object.keys(contract).sort().map(k => [k, contract[k]])])
-writeFileSync(out, JSON.stringify(sorted, null, 2) + "\n")
-console.log(`live_vue_contract: ${Object.keys(contract).length} components -> ${out}`)
+const sorted = Object.fromEntries(Object.keys(contract).sort().map(k => [k, contract[k]]))
+const json = JSON.stringify(sorted, null, 2) + "\n"
+const same = existsSync(out) && readFileSync(out, "utf8") === json
+if (!same) writeFileSync(out, json)
+writeFileSync(depsOut, JSON.stringify([...deps].sort()) + "\n")
+console.log(`live_vue_contract: ${Object.keys(contract).length} components -> ${out}${same ? " (unchanged)" : ""}`)

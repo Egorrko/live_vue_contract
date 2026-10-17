@@ -90,7 +90,7 @@ use LiveVueContract, shared_props: true
 ```elixir
 config :live_vue_contract,
   vue_root: ["assets/vue"],           # where the components live, like LiveVue.Components
-  watch: ["assets/**/*.{vue,ts}"],    # sources whose change regenerates the contract
+  watch: [],                          # extra globs that regenerate the contract (prop types are tracked)
   contract: "assets/vue/contract.json",
   tsconfig: "tsconfig.json",
   validate: true,                     # render-time validation; default: on under Mix outside :prod
@@ -115,9 +115,12 @@ the log is clean. `strict: true` turns "server sends a key the type does not kno
 
 ## CI and Docker
 
-- Commit `assets/vue/contract.json`. Compilation without `node` works as long as the committed file
-  matches the sources; if it is stale and `node` or `vue-component-meta` is missing, `mix compile`
-  fails with a message saying so.
+- What the contract was built from (hash and list of source files) is kept in a stamp under
+  `_build/<env>`, not in the contract. Node runs only when a `.vue` file or a file a prop type is
+  declared in changed; the contract is rewritten only when the schemas changed, so `~H` modules
+  are not recompiled for edits that do not touch props.
+- Without `node`: a committed `assets/vue/contract.json` is used as is (with a note) when `_build`
+  has no stamp; a missing contract fails `mix compile` with a message saying so.
 - To assert freshness in CI where `node` is available: `mix compile && git diff --exit-code assets/vue/contract.json`.
 - If your Dockerfile runs `mix compile` before `COPY assets` (the Phoenix default), there are no
   `.vue` files at that point and the compiler is a no-op; the later `mix release` sees the committed

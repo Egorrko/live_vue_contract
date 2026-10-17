@@ -38,7 +38,7 @@ defmodule LiveVueContract do
 
       config :live_vue_contract,
         vue_root: ["assets/vue"],             # where the components live (like LiveVue.Components)
-        watch: ["assets/**/*.{vue,ts}"],      # sources whose change regenerates the contract
+        watch: [],                            # extra globs that regenerate the contract (prop types are tracked)
         contract: "assets/vue/contract.json",
         tsconfig: "tsconfig.json",
         validate: Mix.env() != :prod,         # render-time validation; :warn = log instead of raise

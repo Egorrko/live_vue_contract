@@ -4,17 +4,61 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The compile-time check walks what Phoenix LiveView compiles HEEx to, which is not public API:
+  # a weekly run against the newest releases on Hex catches a change before users do.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 jobs:
   test:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: oldest (Elixir 1.18, LiveView 1.1, LiveVue 1.2.0)
+            elixir: "1.18"
+            otp: "27"
+            live_view: "~> 1.1.0"
+            live_vue: "1.2.0"
+          - name: locked (Elixir 1.20, mix.lock)
+            elixir: "1.20"
+            otp: "29"
+            lint: true
+          - name: newest on Hex (Elixir 1.20)
+            elixir: "1.20"
+            otp: "29"
+            live_view: "~> 1.0"
+            live_vue: "~> 1.0"
+    env:
+      MIX_ENV: test
+      PHOENIX_LIVE_VIEW_VERSION: ${{ matrix.live_view }}
+      LIVE_VUE_VERSION: ${{ matrix.live_vue }}
+      LIVE_VUE_CONTRACT_NODE: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
-      - run: mix deps.get
-      - run: mix format --check-formatted
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: test/fixtures/app/package-lock.json
+      - run: npm ci --prefix test/fixtures/app
+      # an empty requirement in the matrix means: keep mix.lock
+      - name: Resolve versions
+        run: |
+          if [ -n "$PHOENIX_LIVE_VIEW_VERSION" ]; then mix deps.unlock --all; fi
+          mix deps.get
+          mix deps | grep -A1 -E "^\* (phoenix_live_view|live_vue) "
+      - if: matrix.lint
+        run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix test
+      - if: matrix.lint
+        name: Hex package builds
+        run: mix hex.build

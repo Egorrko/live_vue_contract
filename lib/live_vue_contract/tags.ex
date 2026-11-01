@@ -100,6 +100,9 @@ defmodule LiveVueContract.Tags do
     :ok
   end
 
+  @doc "Whether the template source has a `<.vue>` or `<.X>` shortcut tag (comments excluded)."
+  def mentions?(source, shortcuts), do: source |> strip_comments() |> count_tags(shortcuts) > 0
+
   defp strip_comments(source) do
     source
     |> String.replace(~r/<%!--.*?--%>/s, "")

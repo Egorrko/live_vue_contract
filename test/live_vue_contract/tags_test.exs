@@ -1,3 +1,11 @@
+defmodule LiveVueContract.TagsTest.Resources do
+  # registered after `use LiveVueContract`, so it runs after its @before_compile
+  defmacro __before_compile__(env) do
+    resources = Module.get_attribute(env.module, :external_resource)
+    quote(do: def(resources, do: unquote(resources)))
+  end
+end
+
 defmodule LiveVueContract.TagsTest do
   # Compiles real templates through `use LiveVueContract` / the .heex engine against a small
   # contract: if Phoenix LiveView changes what HEEx compiles to, these fail instead of the
@@ -126,53 +134,91 @@ defmodule LiveVueContract.TagsTest do
     assert e.description =~ "found 1 <.vue> tag(s) in this template but 0 in the compiled HEEx"
   end
 
-  describe ".heex engine" do
-    defp compile_heex(file, opts \\ "") do
-      mod = :"Elixir.LiveVueContract.TagsTest.H#{System.unique_integer([:positive])}"
-      body = LiveVueContract.HEExEngine.compile(file, Path.basename(file))
+  describe ".heex files" do
+    # `embed_templates` in a module with `use LiveVueContract`
+    defp compile_embedded(dir, opts \\ "") do
+      mod = :"Elixir.LiveVueContract.TagsTest.E#{System.unique_integer([:positive])}"
 
       Code.compile_string("""
       defmodule #{inspect(mod)} do
         use Phoenix.Component
         use LiveVueContract#{opts}
-        def render(assigns) do
-          #{Macro.to_string(body)}
-        end
-        def resources, do: @external_resource
+        embed_templates "*", root: #{inspect(dir)}
+        @before_compile LiveVueContract.TagsTest.Resources
       end
       """)
 
       mod
     end
 
-    test "checks <.vue> and <.Shortcut> in template files", %{dir: dir} do
-      ok = Path.join(dir, "ok.html.heex")
-
-      File.write!(
-        ok,
-        ~S|<.vue v-component="HomePage" title="x" /><.HomePage title="y" />| <> "\n"
-      )
-
-      assert compile_heex(ok)
-
-      bad = Path.join(dir, "bad.html.heex")
-      File.write!(bad, "<p>hi</p>\n" <> ~S|<.vue v-component="HomePage" />| <> "\n")
-
-      e = assert_raise CompileError, fn -> compile_heex(bad) end
-      assert e.description =~ "missing required prop"
-      assert e.file == bad
-      assert e.line == 2
-
-      short = Path.join(dir, "short.html.heex")
-      File.write!(short, ~S|<.HomePage count={1} />| <> "\n")
-      assert_raise CompileError, ~r/missing required prop/, fn -> compile_heex(short) end
+    defp heex_dir(dir, files) do
+      sub = Path.join(dir, "t#{System.unique_integer([:positive])}")
+      File.mkdir_p!(sub)
+      for {name, body} <- files, do: File.write!(Path.join(sub, name), body)
+      sub
     end
 
-    test "the module lists the contract as an external resource", %{dir: dir} do
-      file = Path.join(dir, "page.html.heex")
-      File.write!(file, ~S|<.vue v-component="HomePage" title="x" />| <> "\n")
-      mod = compile_heex(file)
+    test "checks <.vue> and <.Shortcut> in embedded templates", %{dir: dir} do
+      ok =
+        heex_dir(dir, %{
+          "page.html.heex" =>
+            ~S|<.vue v-component="HomePage" title="x" /><.HomePage title="y" />| <> "\n",
+          "plain.html.heex" => "<p>no vue here</p>\n"
+        })
+
+      mod = compile_embedded(ok)
       assert Path.expand(Application.get_env(:live_vue_contract, :contract)) in mod.resources()
+
+      bad =
+        heex_dir(dir, %{
+          "bad.html.heex" => "<p>hi</p>\n" <> ~S|<.vue v-component="HomePage" />| <> "\n"
+        })
+
+      e = assert_raise CompileError, fn -> compile_embedded(bad) end
+      assert e.description =~ "missing required prop"
+      assert e.file == Path.join(bad, "bad.html.heex")
+      assert e.line == 2
+
+      short = heex_dir(dir, %{"short.html.heex" => ~S|<.HomePage count={1} />| <> "\n"})
+      assert_raise CompileError, ~r/missing required prop/, fn -> compile_embedded(short) end
+    end
+
+    test "checks the colocated template of a LiveView", %{dir: dir} do
+      n = System.unique_integer([:positive])
+      file = Path.join(dir, "l#{n}.ex")
+
+      File.write!(
+        Path.join(dir, "l#{n}.html.heex"),
+        ~S|<.vue v-component="HomePage" count={1} />| <> "\n"
+      )
+
+      e =
+        assert_raise CompileError, fn ->
+          Code.compile_string(
+            """
+            defmodule LiveVueContract.TagsTest.L#{n} do
+              use Phoenix.LiveView
+              use LiveVueContract
+            end
+            """,
+            file
+          )
+        end
+
+      assert e.description =~ "missing required prop"
+    end
+
+    test "modules without use LiveVueContract are not touched", %{dir: dir} do
+      bad = heex_dir(dir, %{"bad.html.heex" => ~S|<.vue v-component="HomePage" />| <> "\n"})
+      mod = :"Elixir.LiveVueContract.TagsTest.P#{System.unique_integer([:positive])}"
+
+      Code.compile_string("""
+      defmodule #{inspect(mod)} do
+        use Phoenix.Component
+        def vue(assigns), do: ~H""
+        embed_templates "*", root: #{inspect(bad)}
+      end
+      """)
     end
   end
 

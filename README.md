@@ -42,8 +42,8 @@ against it. Nothing is described a second time.
    Named types (`Author`, `Record<string, Author>`) are written once under `"$defs"` and referenced,
    so shared and recursive types cost one entry. It reruns only when a `.vue` file, a file a prop type
    is declared in, or the generator itself changed.
-2. `use LiveVueContract` overrides `~H` (and `LiveVueContract.HEExEngine` does the same for `.heex`
-   files). After the template is compiled as usual, the HEEx AST is walked and every literal
+2. `use LiveVueContract` overrides `~H` and checks the module's `.heex` files (`embed_templates`, a
+   LiveView's colocated template) the same way. After the template is compiled as usual, the HEEx AST is walked and every literal
    `<.vue v-component="X" ...>` (and every `<.X>` shortcut) is compared with the schema of `X`.
    The walk depends on what Phoenix LiveView compiles a function component to; the tags are also
    counted in the template source, and a template where the walk found fewer is a `CompileError`, so a
@@ -74,11 +74,6 @@ end
 ```elixir
 # lib/my_app_web.ex, inside html_helpers — replaces `use LiveVue` and `use LiveVue.Components`
 use LiveVueContract
-```
-
-```elixir
-# config/config.exs — only if `<.vue>` tags live in .heex files (colocated templates, embed_templates)
-config :phoenix, :template_engines, heex: LiveVueContract.HEExEngine
 ```
 
 ```sh

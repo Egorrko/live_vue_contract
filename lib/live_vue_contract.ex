@@ -7,9 +7,10 @@ defmodule LiveVueContract do
   regenerated whenever a `.vue`/`.ts` source changes); this module checks the Elixir side
   against it twice:
 
-    * at compile time, in `~H`: every literal `<.vue v-component="X" ...>` (and every
-      `<.X>` shortcut) must pass exactly the props `X` declares — missing required prop,
-      undeclared prop, unknown or ambiguous component name are `CompileError`s;
+    * at compile time, in `~H` and in the module's `.heex` files: every literal
+      `<.vue v-component="X" ...>` (and every `<.X>` shortcut) must pass exactly the props `X`
+      declares — missing required prop, undeclared prop, unknown or ambiguous component name are
+      `CompileError`s;
     * at render time (dev and test), in `vue/1`: the encoded props must match the nested
       schema — renamed key inside a list item, string instead of number, unexpected `null`
       raise `ArgumentError` with the JSON path. Off in `prod`.
@@ -67,6 +68,7 @@ defmodule LiveVueContract do
       end
 
     quote do
+      @before_compile LiveVueContract
       require LiveVue.SharedPropsView
       import Phoenix.Component, except: [sigil_H: 2]
       import LiveVue, except: [vue: 1]
@@ -76,6 +78,51 @@ defmodule LiveVueContract do
 
       unquote_splicing(shortcuts)
     end
+  end
+
+  # `.heex` files of the module: `embed_templates` lists them as external resources, a LiveView's
+  # colocated template (`page_live.html.heex` next to `page_live.ex`) is found by name, like
+  # Phoenix.LiveView.Renderer does. Each file with a `<.vue>` tag is compiled once more, only for
+  # the check; the module keeps the code Phoenix compiled. This is done here and not with a
+  # template engine in `config :phoenix, :template_engines`: that config also applies to
+  # dependencies, which compile before live_vue_contract does.
+  @doc false
+  defmacro __before_compile__(env) do
+    shortcuts = Module.get_attribute(env.module, :live_vue_shortcuts) || []
+    colocated = Path.join(Path.dirname(env.file), template_name(env.module) <> ".heex")
+
+    files =
+      (List.wrap(Module.get_attribute(env.module, :external_resource)) ++ [colocated])
+      |> Enum.filter(&String.ends_with?(&1, ".heex"))
+      |> Enum.map(&Path.expand/1)
+      |> Enum.uniq()
+      |> Enum.filter(&File.regular?/1)
+
+    for path <- files,
+        source = File.read!(path),
+        LiveVueContract.Tags.mentions?(source, shortcuts),
+        do: check_heex!(path, source, env, shortcuts)
+
+    :ok
+  end
+
+  defp template_name(module),
+    do: module |> Module.split() |> List.last() |> Macro.underscore() |> Kernel.<>(".html")
+
+  defp check_heex!(path, source, env, shortcuts) do
+    Module.put_attribute(env.module, :external_resource, Path.expand(Schema.path()))
+    {:ok, env} = Macro.Env.define_require(env, [], Phoenix.LiveView.HTMLEngine)
+    call = quote(do: Phoenix.LiveView.HTMLEngine.compile(unquote(path)))
+    ast = Macro.expand_once(call, env)
+
+    if ast == call,
+      do:
+        raise(CompileError,
+          file: path,
+          description: "live_vue_contract: could not expand #{path}"
+        )
+
+    LiveVueContract.Tags.check!(ast, source: source, file: path, line: 1, shortcuts: shortcuts)
   end
 
   @doc "`~H` that compiles as usual and then checks every `<.vue>` tag against the contract."

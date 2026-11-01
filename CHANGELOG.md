@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — 2026-11-01
+
+- `.heex` files are checked by `use LiveVueContract` itself: templates from `embed_templates` and a
+  LiveView's colocated template, in any module with `use LiveVueContract`. No config needed.
+- `LiveVueContract.HEExEngine` is removed: set in `config :phoenix, :template_engines`, it also
+  applied to dependencies, and a dependency with `.heex` files (`oban_web`) failed to compile on a
+  clean build, before live_vue_contract itself was compiled. Delete that config line.
+
 ## 0.3.0 — 2026-11-01
 
 - The generator builds schemas from the TypeScript types itself (vue-component-meta only lists the

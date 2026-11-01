@@ -54,7 +54,7 @@ jobs:
         run: |
           if [ -n "$PHOENIX_LIVE_VIEW_VERSION" ]; then mix deps.unlock --all; fi
           mix deps.get
-          mix deps | grep -E "^\* (phoenix_live_view|live_vue) "
+          mix deps | grep -A1 -E "^\* (phoenix_live_view|live_vue) "
       - if: matrix.lint
         run: mix format --check-formatted
       - run: mix compile --warnings-as-errors

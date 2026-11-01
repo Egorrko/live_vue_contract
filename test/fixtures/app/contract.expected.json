@@ -1,0 +1,337 @@
+{
+  "Kitchen": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "count": {
+        "type": "number"
+      },
+      "done": {
+        "type": "boolean"
+      },
+      "note": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "flag": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "maybe": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "status": {
+        "enum": [
+          "open",
+          "closed"
+        ]
+      },
+      "level": {
+        "enum": [
+          1,
+          2,
+          3
+        ]
+      },
+      "size": {
+        "enum": [
+          "s",
+          "l"
+        ]
+      },
+      "slug": {
+        "type": "string"
+      },
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "pair": {
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "author": {
+        "$ref": "Author"
+      },
+      "editor": {
+        "$ref": "Author"
+      },
+      "comments": {
+        "type": "array",
+        "items": {
+          "$ref": "Comment"
+        }
+      },
+      "scores": {
+        "$ref": "Record<string, number>"
+      },
+      "authors_by_id": {
+        "$ref": "Record<string, Author>"
+      },
+      "totals": {
+        "$ref": "Record<\"open\" | \"closed\", number>"
+      },
+      "index": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": {
+          "type": "boolean"
+        }
+      },
+      "settings": {
+        "$ref": "Partial<Settings>"
+      },
+      "picked": {
+        "$ref": "Pick<Settings, \"theme\">"
+      },
+      "tagged": {
+        "$ref": "WithId<{ label: string; }>"
+      },
+      "meta": {
+        "type": "any"
+      },
+      "anchor": {
+        "type": "any"
+      },
+      "when": {
+        "type": "any"
+      },
+      "lookup": {
+        "type": "any"
+      },
+      "callback": {
+        "type": "any"
+      },
+      "anything": {
+        "type": "any"
+      }
+    },
+    "required": [
+      "title",
+      "count",
+      "done",
+      "maybe",
+      "status",
+      "level",
+      "size",
+      "slug",
+      "tags",
+      "pair",
+      "author",
+      "editor",
+      "comments",
+      "scores",
+      "authors_by_id",
+      "totals",
+      "index",
+      "settings",
+      "picked",
+      "tagged",
+      "meta",
+      "anchor",
+      "when",
+      "lookup",
+      "callback",
+      "anything"
+    ]
+  },
+  "nested/Card": {
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "label"
+    ]
+  },
+  "nested/index": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      }
+    },
+    "required": [
+      "items"
+    ]
+  },
+  "$defs": {
+    "Author": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "avatar": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "avatar"
+      ]
+    },
+    "Comment": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "body": {
+          "type": "string"
+        },
+        "author": {
+          "$ref": "Author"
+        },
+        "replies": {
+          "type": "array",
+          "items": {
+            "$ref": "Comment"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "author",
+        "replies"
+      ]
+    },
+    "Partial<Settings>": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "volume": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "required": []
+    },
+    "Pick<Settings, \"theme\">": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theme"
+      ]
+    },
+    "Record<\"open\" | \"closed\", number>": {
+      "type": "object",
+      "properties": {
+        "open": {
+          "type": "number"
+        },
+        "closed": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "open",
+        "closed"
+      ]
+    },
+    "Record<string, Author>": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": {
+        "$ref": "Author"
+      }
+    },
+    "Record<string, number>": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "WithId<{ label: string; }>": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "id"
+      ]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM"],
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["assets/**/*"]
+}

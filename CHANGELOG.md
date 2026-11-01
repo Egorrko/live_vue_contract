@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 — 2026-11-01
+
+- The generator builds schemas from the TypeScript types itself (vue-component-meta only lists the
+  props): `Record<K, V>`, index signatures, `Partial`, `Pick`, intersections, tuples, enums and
+  template literal types are checked instead of becoming `any`.
+- Named types go to `"$defs"` in the contract and are referenced with `{"$ref": name}`: a type
+  shared by many components is written once, and recursive types are checked at every depth.
+- A template whose source has more `<.vue>` tags than the compile-time walk found is a
+  `CompileError`: a Phoenix LiveView release that changes compiled HEEx can no longer turn the
+  check off silently.
+- `LiveVueContract.HEExEngine` checks `<.vue>` in `.heex` files
+  (`config :phoenix, :template_engines, heex: LiveVueContract.HEExEngine`).
+- Compile errors point at the line of the tag in `.heex` files too.
+- The generator script is part of the stamp hash: upgrading the library regenerates the contract.
+- `phoenix_live_view ~> 1.1` is a direct dependency. Published on Hex.
+- Tests: real templates compiled through `~H` and the `.heex` engine; the generator and the Mix
+  compiler against a fixture Vue project with a checked-in expected contract. CI covers the oldest,
+  locked and newest versions, and runs weekly.
+
 ## 0.2.0 — 2026-10-17
 
 - The source hash moved from `"$sources"` in the contract to a stamp in the Mix manifest directory

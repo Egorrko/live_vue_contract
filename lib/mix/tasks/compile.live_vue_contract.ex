@@ -81,16 +81,22 @@ defmodule Mix.Tasks.Compile.LiveVueContract do
       |> Enum.uniq()
       |> Enum.sort()
 
+    # the generator itself is a source: a library upgrade that changes it regenerates the contract
     :crypto.hash(
       :sha256,
-      Enum.map(sources, fn path ->
-        case File.read(path) do
-          {:ok, content} -> [path, 0, content, 0]
-          {:error, _} -> [path, 1]
-        end
-      end)
+      [
+        File.read!(script())
+        | Enum.map(sources, fn path ->
+            case File.read(path) do
+              {:ok, content} -> [path, 0, content, 0]
+              {:error, _} -> [path, 1]
+            end
+          end)
+      ]
     )
   end
+
+  defp script, do: Path.join(:code.priv_dir(:live_vue_contract), "gen.mjs")
 
   defp no_node_modules(paths), do: Enum.reject(paths, &String.contains?(&1, "node_modules"))
 
@@ -119,7 +125,7 @@ defmodule Mix.Tasks.Compile.LiveVueContract do
   end
 
   defp run_generator(node, roots, vue_files, out) do
-    script = Path.join(:code.priv_dir(:live_vue_contract), "gen.mjs")
+    script = script()
     tsconfig = Application.get_env(:live_vue_contract, :tsconfig, "tsconfig.json")
     File.mkdir_p!(Mix.Project.manifest_path())
     deps_file = stamp_path() <> ".deps.json"

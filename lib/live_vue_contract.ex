@@ -17,13 +17,13 @@ defmodule LiveVueContract do
   ## Setup
 
       # mix.exs
-      {:live_vue_contract, github: "Egorrko/live_vue_contract"},
+      {:live_vue_contract, "~> 0.3"},
       compilers: [:live_vue_contract, :phoenix_live_view] ++ Mix.compilers()
 
       # lib/my_app_web.ex, in html_helpers, replacing `use LiveVue` and `use LiveVue.Components`
       use LiveVueContract
 
-      $ npm install -D vue-component-meta
+      $ npm install -D vue-component-meta typescript
 
   Then `mix compile` writes `assets/vue/contract.json` — commit it, so CI and Docker builds
   without `node` still get the compile-time check.
@@ -99,9 +99,18 @@ defmodule LiveVueContract do
           description: "could not expand ~H"
         )
 
-    check_tags!(ast, caller)
+    LiveVueContract.Tags.check!(ast,
+      source: template_source(template),
+      file: caller.file,
+      line: caller.line,
+      shortcuts: Module.get_attribute(caller.module, :live_vue_shortcuts) || []
+    )
+
     ast
   end
+
+  defp template_source({:<<>>, _meta, [source]}) when is_binary(source), do: source
+  defp template_source(_template), do: nil
 
   @doc "Drop-in for `LiveVue.vue/1` that validates the props against the contract first."
   def vue(assigns) do
@@ -197,79 +206,5 @@ defmodule LiveVueContract do
       |> Enum.split_with(fn {_k, v} -> is_struct(v, Phoenix.LiveView.LiveStream) end)
 
     {Map.new(values), Enum.map(streams, fn {k, _} -> to_string(k) end)}
-  end
-
-  # --- compile time ---------------------------------------------------------
-
-  defp check_tags!(ast, caller) do
-    shortcuts = Module.get_attribute(caller.module, :live_vue_shortcuts) || []
-
-    Macro.prewalk(ast, fn
-      {{:., _, [_, :component]}, _, [{:&, _, [{:/, _, [{fun, _, ctx}, 1]}]}, {:%{}, meta, kw}, _]} =
-          node
-      when is_atom(fun) and is_atom(ctx) ->
-        line = Keyword.get(meta, :line, caller.line)
-
-        case tag_name(fun, kw, shortcuts) do
-          nil -> :skip
-          name -> check_tag!(name, kw, caller, line)
-        end
-
-        node
-
-      node ->
-        node
-    end)
-  end
-
-  defp tag_name(:vue, kw, _shortcuts) when is_list(kw) do
-    case Keyword.get(kw, :"v-component") do
-      name when is_binary(name) -> name
-      _ -> nil
-    end
-  end
-
-  defp tag_name(fun, kw, shortcuts) when is_list(kw) do
-    name = Atom.to_string(fun)
-    if name in shortcuts, do: name
-  end
-
-  defp tag_name(_fun, _dynamic_map, _shortcuts), do: nil
-
-  defp check_tag!(name, kw, caller, line) do
-    if Schema.all() != %{} do
-      case Schema.fetch(name) do
-        {:ok, schema} ->
-          case Schema.check_keys(schema, Keyword.keys(kw)) do
-            [] ->
-              :ok
-
-            problems ->
-              compile_error!(
-                caller,
-                line,
-                "<.vue v-component=#{inspect(name)}>: " <> Enum.join(problems, "; ")
-              )
-          end
-
-        :error ->
-          compile_error!(
-            caller,
-            line,
-            "unknown Vue component #{inspect(name)} (not in #{Schema.path()})"
-          )
-
-        {:ambiguous, keys} ->
-          compile_error!(
-            caller,
-            line,
-            "Vue component #{inspect(name)} is ambiguous: #{Enum.join(keys, ", ")}"
-          )
-      end
-    end
-  end
-
-  defp compile_error!(caller, line, description) do
-    raise CompileError, file: caller.file, line: line, description: description
   end
 end

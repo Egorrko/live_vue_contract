@@ -1,7 +1,7 @@
 defmodule LiveVueContract.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.5.1"
   @source_url "https://github.com/Egorrko/live_vue_contract"
 
   def project do

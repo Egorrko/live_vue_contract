@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 — 2026-11-23
+
+- `mix live_vue_contract.coverage` counts every component: the report loads the app's modules
+  before looking for templates, so it no longer sees only those a test helper happened to load.
+
 ## 0.5.0 — 2026-11-23
 
 - **Coverage of partitioned runs.** Under `mix test --partitions N` each partition adds what it

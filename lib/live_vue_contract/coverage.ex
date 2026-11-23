@@ -119,6 +119,7 @@ defmodule LiveVueContract.Coverage do
   def report(app, seen? \\ &seen?/2) do
     tags =
       for module <- modules(app),
+          Code.ensure_loaded?(module),
           function_exported?(module, :__live_vue_tags__, 0),
           name <- module.__live_vue_tags__(),
           {:ok, key, _schema} <- [Schema.resolve(name)],

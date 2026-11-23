@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Contract without fallthrough attributes.** With `vueCompilerOptions.fallthroughAttributes` on
+  in the host's tsconfig, vue-component-meta listed every attribute of a component's root element as
+  its prop — all of HTML, or a library component's whole API — and the contract grew to hundreds of
+  MB (320 MB in one app), parsed by every BEAM on the first render. The generator now reads the
+  tsconfig with that option forced off; vue-tsc keeps it.
+
 ## 0.5.1 — 2026-11-23
 
 - `mix live_vue_contract.coverage` counts every component: the report loads the app's modules

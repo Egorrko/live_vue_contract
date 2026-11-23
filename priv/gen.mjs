@@ -19,7 +19,7 @@ import path from "path"
 
 const [tsconfig, out, depsOut, ...roots] = process.argv.slice(2)
 const require = createRequire(path.resolve("package.json"))
-const { createChecker } = require("vue-component-meta")
+const { createCheckerByJson } = require("vue-component-meta")
 const ts = require("typescript")
 
 const ANY = { type: "any" }
@@ -152,8 +152,18 @@ function objectSchema(type, checker, inner) {
 
 // The TypeScript checker that owns a prop's type. Types carry it; the schema option is a fallback
 // that hands it to us without expanding anything.
+//
+// The contract is about the props a component declares. With `fallthroughAttributes` on in the
+// host's tsconfig (vue-tsc then types attrs passed through to the root element), vue-component-meta
+// lists every attribute of the root element as a prop too: all of HTML, or the whole API of a
+// library component (motion-v's `transition` alone is ~245 KB of schema), in every component —
+// a contract of hundreds of MB that each BEAM parses on the first render. So the checker reads the
+// host's tsconfig with that one option forced off.
 let fromMeta
-const checker = createChecker(path.resolve(tsconfig), {
+const checker = createCheckerByJson(process.cwd(), {
+  extends: path.resolve(tsconfig),
+  vueCompilerOptions: { fallthroughAttributes: false },
+}, {
   forceUseTs: true,
   noDeclarations: false,
   schema: { ignore: [(_name, _type, typeChecker) => ((fromMeta ??= typeChecker), true)] },

@@ -51,6 +51,18 @@ defmodule LiveVueContract.GeneratorTest do
     """
   end
 
+  test "fallthroughAttributes in the host's tsconfig adds no props", %{app: app} do
+    tsconfig = Path.join(app, "tsconfig.json")
+    config = tsconfig |> File.read!() |> JSON.decode!()
+
+    File.write!(
+      tsconfig,
+      JSON.encode!(Map.put(config, "vueCompilerOptions", %{"fallthroughAttributes" => true}))
+    )
+
+    assert generate(app) == File.read!(@expected)
+  end
+
   test "deps list the .vue files and the .ts files prop types come from", %{app: app} do
     generate(app)
 

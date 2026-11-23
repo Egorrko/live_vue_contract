@@ -40,7 +40,13 @@ export interface LiveEvents<E extends EventMap> {
  * live_vue_contract reads the type argument and, in dev and test, checks the params
  * `handle_event` receives and the map it replies with against it.
  */
-export function useLiveEvents<E extends EventMap>(live: LiveVueHook): LiveEvents<E>
+export function useLiveEvents<E extends EventMap>(live: LiveVueHook | AnyHook): LiveEvents<E>
+
+/**
+ * When TypeScript cannot resolve phoenix_live_view's types, LiveVue's `LiveHook` collapses to
+ * an index signature that lacks `pushEvent`; the hook is still accepted, and checked at runtime.
+ */
+type AnyHook = { [key: string]: any }
 
 /** The part of LiveVue's `useLiveVue()` hook this wraps. */
 export interface LiveVueHook {

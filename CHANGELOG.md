@@ -16,6 +16,12 @@
   <key>.vue" and name the resolved contract key.
 - The Mix compiler also hashes scripts under `:vue_root` that import "live_vue_contract", so a new
   `useLiveEvents` regenerates the contract.
+- A union of partials (`Partial<A> | Partial<B>`) picks the alternative that declares the value's
+  keys: ties on errors are broken by fewer unknown keys, so `strict` no longer fails a valid value.
+- A property typed `unknown`, `any` or `T | undefined` is not required: JSON drops `undefined`.
+- `validate: :warn` no longer breaks compilation (`BadBooleanError` in the `handle_event` wrapper).
+- `useLiveEvents` accepts LiveVue's `LiveHook` even when phoenix_live_view's types do not resolve
+  and `LiveHook` collapses to an index signature.
 
 ## 0.3.1 — 2026-11-01
 

@@ -143,9 +143,10 @@ defmodule LiveVueContract.EventsTest do
   end
 
   test "validate: :warn logs instead of raising" do
+    # set before compiling: the wrapper is compiled in for :warn too
+    Application.put_env(:live_vue_contract, :validate, :warn)
     mod = live_view()
     Events.rendered("nested/Card")
-    Application.put_env(:live_vue_contract, :validate, :warn)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->

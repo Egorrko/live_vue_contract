@@ -122,6 +122,12 @@ function toSchema(type, checker, stack) {
   return objectSchema(type, checker, [...stack, type])
 }
 
+function acceptsUndefined(type) {
+  const F = ts.TypeFlags
+  const types = type.isUnion() ? type.types : [type]
+  return types.some(t => t.flags & (F.Any | F.Unknown | F.Undefined | F.Void))
+}
+
 function objectSchema(type, checker, inner) {
   const F = ts.TypeFlags
   const properties = {}
@@ -130,7 +136,9 @@ function objectSchema(type, checker, inner) {
   for (const prop of checker.getPropertiesOfType(type)) {
     for (const d of prop.getDeclarations() ?? []) track(d.getSourceFile().fileName)
     properties[prop.name] = toSchema(checker.getTypeOfSymbol(prop), checker, inner)
-    if (!(prop.flags & ts.SymbolFlags.Optional)) required.push(prop.name)
+    const propType = checker.getTypeOfSymbol(prop)
+    // `x: unknown` / `x: T | undefined`: JSON drops undefined, so on the wire the key may be absent
+    if (!(prop.flags & ts.SymbolFlags.Optional) && !acceptsUndefined(propType)) required.push(prop.name)
   }
 
   const schema = { type: "object", properties, required }

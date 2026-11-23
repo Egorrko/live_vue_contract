@@ -3,6 +3,6 @@ import type { Author } from "./types"
 import { hook } from "./hook"
 
 export function useBoard() {
-  const live = useLiveEvents<{ refresh: { reply: { authors: Author[] } } }>(hook)
+  const live = useLiveEvents<{ refresh: { reply: { authors: Author[]; extra: unknown; note: string | undefined } } }>(hook)
   return { refresh: () => live.pushEvent("refresh") }
 }

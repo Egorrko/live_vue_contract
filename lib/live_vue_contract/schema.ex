@@ -137,7 +137,7 @@ defmodule LiveVueContract.Schema do
   end
 
   defp do_validate(%{"anyOf" => alts}, v, p, d) do
-    # the alternative with the fewest errors decides: none -> keep its warnings, some -> one union message
+    # the alternative with the fewest errors (then warnings) decides: none -> keep its warnings, some -> one union message
     # an alternative the value matched structurally (errors only inside) beats one it did not
     # match at all; then one whose literal keys agree with the value (`ok: false` picks
     # `{ ok: false; error: string }` out of a discriminated union); then fewer errors
@@ -147,8 +147,10 @@ defmodule LiveVueContract.Schema do
       |> Enum.min_by(fn {alt, problems} ->
         errors = Enum.filter(problems, &match?({:error, _, _}, &1))
 
+        # last, fewer unknown keys: `Partial<A> | Partial<B>` all match with no errors, the
+        # branch that declares the keys the value carries is the one meant
         {Enum.any?(errors, fn {_, path, _} -> path == p end), discriminant_mismatch?(alt, v, d),
-         length(errors)}
+         length(errors), length(problems) - length(errors)}
       end)
       |> elem(1)
 

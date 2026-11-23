@@ -204,12 +204,13 @@ defmodule LiveVueContract do
 
   # Deps compile with Mix.env() == :prod, so the default is decided at runtime: under Mix
   # (mix phx.server, mix test) in a non-prod env — validate; in a release there is no Mix — don't.
+  # true / :warn -> validate (raising or logging), false -> off
   defp validate? do
     Application.get_env(
       :live_vue_contract,
       :validate,
       function_exported?(Mix, :env, 0) and Mix.env() != :prod
-    )
+    ) not in [false, nil]
   end
 
   @doc false

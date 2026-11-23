@@ -366,6 +366,19 @@
               "items": {
                 "$ref": "Author"
               }
+            },
+            "extra": {
+              "type": "any"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
             }
           },
           "required": [

@@ -237,6 +237,9 @@ generator: `LIVE_VUE_CONTRACT_UPDATE=1 mix test` and review the diff.
 The Elixir tests cover the schema validator and name resolution. The generator is exercised against
 real projects; see `CHANGELOG.md` for what it was verified on.
 
+The study the library came out of — failure modes, precedents (Inertia, spatie, ash_typescript),
+the directions compared and the first prototype — is in [`docs/research`](docs/research) (Russian).
+
 ## License
 
 MIT

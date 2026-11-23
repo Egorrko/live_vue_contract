@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-11-23
 
 - **Coverage of partitioned runs.** Under `mix test --partitions N` each partition adds what it
   saw to `_build/live_vue_contract_coverage/<partition>.etf` instead of printing a partial report;

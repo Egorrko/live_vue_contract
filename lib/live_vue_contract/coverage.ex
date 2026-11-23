@@ -19,21 +19,86 @@ defmodule LiveVueContract.Coverage do
   for them; events count when a component declares them with `useLiveEvents`.
 
   Option `:app` — the OTP app whose modules hold the templates (default: the current Mix project).
+
+  ## Partitioned runs
+
+  Under `mix test --partitions N` (`MIX_TEST_PARTITION` is set) every partition sees only its
+  own tests, so instead of printing a partial report each one adds what it saw to
+  `_build/live_vue_contract_coverage/<partition>.etf`. After the last partition,
+  `mix live_vue_contract.coverage` merges the files, prints one report and deletes them.
+  Option `:export` names the file explicitly (`export: "unit"`) for other ways of splitting a run.
   """
 
   alias LiveVueContract.Schema
 
   @flag {__MODULE__, :on}
 
-  @doc "Starts recording and prints the report after the suite."
+  @doc "Starts recording and prints the report (or exports it, see above) after the suite."
   def start(opts \\ []) do
     :persistent_term.put(@flag, true)
     app = Keyword.get_lazy(opts, :app, fn -> Mix.Project.config()[:app] end)
 
-    ExUnit.after_suite(fn _result -> app |> report() |> format() |> IO.puts() end)
+    export =
+      Keyword.get_lazy(opts, :export, fn ->
+        case System.get_env("MIX_TEST_PARTITION", "") do
+          "" -> nil
+          n -> "partition_" <> n
+        end
+      end)
+
+    ExUnit.after_suite(fn _result ->
+      if export do
+        path = export(export)
+
+        IO.puts(
+          "live_vue_contract: coverage written to #{Path.relative_to_cwd(path)}, " <>
+            "mix live_vue_contract.coverage merges the partitions"
+        )
+      else
+        app |> report() |> format() |> IO.puts()
+      end
+    end)
 
     :ok
   end
+
+  @doc false
+  def dir, do: Path.join(Path.dirname(Mix.Project.build_path()), "live_vue_contract_coverage")
+
+  @doc """
+  Adds what this run saw to `<dir>/<name>.etf` (a union with an earlier run under the same name,
+  e.g. a partition retried on its failures) and returns the path.
+  """
+  def export(name) do
+    path = Path.join(dir(), name <> ".etf")
+    File.mkdir_p!(dir())
+    write_seen(path, MapSet.union(read_seen(path), seen()))
+    path
+  end
+
+  @doc """
+  Merges the exported files: `{report, files}`. `files` is empty when nothing was exported.
+  """
+  def merge(app) do
+    files = Path.wildcard(Path.join(dir(), "*.etf"))
+    all = Enum.reduce(files, MapSet.new(), &MapSet.union(read_seen(&1), &2))
+    {report(app, &MapSet.member?(all, {&1, &2})), files}
+  end
+
+  defp seen do
+    for {{__MODULE__, kind, key}, true} <- :persistent_term.get(),
+        into: MapSet.new(),
+        do: {kind, key}
+  end
+
+  defp read_seen(path) do
+    case File.read(path) do
+      {:ok, bin} -> :erlang.binary_to_term(bin)
+      {:error, :enoent} -> MapSet.new()
+    end
+  end
+
+  defp write_seen(path, set), do: File.write!(path, :erlang.term_to_binary(set))
 
   @doc false
   def record(kind, key) do
@@ -51,7 +116,7 @@ defmodule LiveVueContract.Coverage do
   @doc """
   `%{components: [{key, [module]}], unrendered: [...], events: [name], unpushed: [{name, [file]}]}`.
   """
-  def report(app) do
+  def report(app, seen? \\ &seen?/2) do
     tags =
       for module <- modules(app),
           function_exported?(module, :__live_vue_tags__, 0),
@@ -62,7 +127,7 @@ defmodule LiveVueContract.Coverage do
       end
 
     components = tags |> Enum.sort()
-    unrendered = Enum.reject(components, fn {key, _} -> seen?(:component, key) end)
+    unrendered = Enum.reject(components, fn {key, _} -> seen?.(:component, key) end)
 
     events =
       Schema.events()
@@ -71,7 +136,7 @@ defmodule LiveVueContract.Coverage do
       end)
       |> Enum.sort()
 
-    unpushed = Enum.reject(events, fn {name, _} -> seen?(:event, name) end)
+    unpushed = Enum.reject(events, fn {name, _} -> seen?.(:event, name) end)
 
     %{components: components, unrendered: unrendered, events: events, unpushed: unpushed}
   end

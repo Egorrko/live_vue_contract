@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Coverage of partitioned runs.** Under `mix test --partitions N` each partition adds what it
+  saw to `_build/live_vue_contract_coverage/<partition>.etf` instead of printing a partial report;
+  `mix live_vue_contract.coverage` merges the files into one report and deletes them.
+  `Coverage.start(export: name)` does the same for other ways of splitting a run.
+
 ## 0.4.0 — 2026-11-23
 
 - **Events.** `useLiveEvents<{ name: { payload; reply } }>(useLiveVue())` from the new

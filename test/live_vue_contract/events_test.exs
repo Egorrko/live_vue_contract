@@ -174,4 +174,29 @@ defmodule LiveVueContract.EventsTest do
     assert Enum.map(events, &elem(&1, 0)) == ["refresh", "save"]
     assert Coverage.format(report) =~ "never pushed: refresh (assets/vue/board.ts)"
   end
+
+  test "partitions export what they saw; the merge reports the union" do
+    File.rm_rf!(Coverage.dir())
+    on_exit(fn -> File.rm_rf!(Coverage.dir()) end)
+
+    :persistent_term.put({Coverage, :on}, true)
+    on_exit(fn -> :persistent_term.erase({Coverage, :on}) end)
+    Coverage.record(:event, "refresh")
+    path = Coverage.export("partition_1")
+
+    File.write!(
+      Path.join(Coverage.dir(), "partition_2.etf"),
+      :erlang.term_to_binary(MapSet.new([{:event, "save"}]))
+    )
+
+    assert {report, files} = Coverage.merge(:live_vue_contract)
+    assert path in files and length(files) == 2
+    assert report.unpushed == []
+
+    assert {_, []} =
+             (
+               File.rm_rf!(Coverage.dir())
+               Coverage.merge(:live_vue_contract)
+             )
+  end
 end

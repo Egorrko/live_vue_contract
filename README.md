@@ -152,6 +152,13 @@ live_vue_contract: 20 of 20 <.vue> components rendered, 6 of 7 events pushed
   never pushed: refresh (assets/vue/RolesAdmin.vue)
 ```
 
+With `mix test --partitions N` each partition sees only its share of the tests, so it writes what it
+saw to `_build/live_vue_contract_coverage/` instead; one report for the whole run:
+
+```
+MIX_ENV=test mix live_vue_contract.coverage
+```
+
 ## Configuration
 
 ```elixir

@@ -1,0 +1,16 @@
+{
+  "name": "live_vue_contract",
+  "version": "0.4.0",
+  "description": "Typed pushEvent for LiveVue: the event types live_vue_contract checks handle_event against",
+  "license": "MIT",
+  "type": "module",
+  "main": "assets/index.js",
+  "types": "assets/index.d.ts",
+  "files": [
+    "assets/index.js",
+    "assets/index.d.ts"
+  ],
+  "peerDependencies": {
+    "live_vue": ">=1.0.0"
+  }
+}

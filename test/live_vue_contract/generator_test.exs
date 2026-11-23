@@ -19,7 +19,15 @@ defmodule LiveVueContract.GeneratorTest do
     for entry <- ~w(assets tsconfig.json package.json),
         do: File.cp_r!(Path.join(@fixture, entry), Path.join(tmp, entry))
 
-    File.ln_s!(Path.join(@fixture, "node_modules"), Path.join(tmp, "node_modules"))
+    # node_modules of the fixture plus this library as the "live_vue_contract" npm package, the way a
+    # host gets it with `"live_vue_contract": "file:./deps/live_vue_contract"`
+    modules = Path.join(tmp, "node_modules")
+    File.mkdir_p!(modules)
+
+    for entry <- File.ls!(Path.join(@fixture, "node_modules")),
+        do: File.ln_s!(Path.join([@fixture, "node_modules", entry]), Path.join(modules, entry))
+
+    File.ln_s!(Path.expand("../..", __DIR__), Path.join(modules, "live_vue_contract"))
     on_exit(fn -> File.rm_rf!(tmp) end)
     %{app: tmp}
   end
@@ -28,7 +36,7 @@ defmodule LiveVueContract.GeneratorTest do
     script = Path.join(:code.priv_dir(:live_vue_contract), "gen.mjs")
     args = [script, "tsconfig.json", "contract.json", "deps.json", "assets/vue"]
     {out, 0} = System.cmd("node", args, cd: app, stderr_to_stdout: true)
-    assert out =~ "3 components"
+    assert out =~ "5 components, 2 events"
     File.read!(Path.join(app, "contract.json"))
   end
 
@@ -47,7 +55,8 @@ defmodule LiveVueContract.GeneratorTest do
     generate(app)
 
     assert app |> Path.join("deps.json") |> File.read!() |> JSON.decode!() ==
-             ~w(assets/vue/Kitchen.vue assets/vue/nested/Card.vue assets/vue/nested/index.vue assets/vue/types.ts)
+             ~w(assets/vue/Board.vue assets/vue/Kitchen.vue assets/vue/Other.vue assets/vue/board.ts
+                assets/vue/nested/Card.vue assets/vue/nested/index.vue assets/vue/types.ts)
   end
 
   describe "generated schemas validate wire values" do
@@ -142,6 +151,43 @@ defmodule LiveVueContract.GeneratorTest do
     end
   end
 
+  describe "events" do
+    setup %{app: app} do
+      generate(app)
+      Application.put_env(:live_vue_contract, :contract, Path.join(app, "contract.json"))
+      on_exit(fn -> Application.delete_env(:live_vue_contract, :contract) end)
+    end
+
+    test "declarations are credited to every component that imports them at runtime" do
+      assert %{"refresh" => [refresh], "save" => saves} = Schema.events()
+
+      assert refresh["components"] == ["Board"]
+      assert refresh["declared"] == ["assets/vue/board.ts"]
+      assert refresh["payload"] == %{"type" => "object", "properties" => %{}, "required" => []}
+
+      assert [other, card] = Enum.sort_by(saves, & &1["declared"])
+      assert card["components"] == ["Board", "nested/Card"]
+      assert other["components"] == ["Other"]
+      assert other["reply"] == nil
+    end
+
+    test "payload and reply schemas validate wire values" do
+      %{"refresh" => [refresh], "save" => saves} = Schema.events()
+      card = Enum.find(saves, &(&1["declared"] == ["assets/vue/nested/Card.vue"]))
+
+      assert Schema.validate(card["payload"], %{"id" => 1, "label" => "x"}) == []
+
+      assert [{:error, "/id", _}] =
+               Schema.validate(card["payload"], %{"id" => "1", "label" => "x"})
+
+      assert Schema.validate(card["reply"], %{"ok" => false, "error" => "no"}) == []
+      assert [{:error, "/ok", _}] = Schema.validate(card["reply"], %{"error" => "no"})
+
+      assert [{:error, "/authors/0/name", _}] =
+               Schema.validate(refresh["reply"], %{"authors" => [%{"avatar" => nil}]})
+    end
+  end
+
   describe "Mix compiler" do
     setup %{app: app} do
       stamp = Path.join(Mix.Project.manifest_path(), "compile.live_vue_contract")
@@ -188,6 +234,14 @@ defmodule LiveVueContract.GeneratorTest do
 
       assert contract |> File.read!() |> JSON.decode!() |> get_in(["nested/Card", "required"]) ==
                ["label", "size"]
+
+      # a new declaration in a file nothing imports yet still regenerates the contract
+      File.write!(Path.join(app, "assets/vue/later.ts"), """
+      import { useLiveEvents } from "live_vue_contract"
+      export const later = (hook: any) => useLiveEvents<{ later: {} }>(hook)
+      """)
+
+      assert {:ok, []} = run.()
     end
   end
 end

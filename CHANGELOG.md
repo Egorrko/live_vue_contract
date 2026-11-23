@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 — unreleased
+
+- **Events.** `useLiveEvents<{ name: { payload; reply } }>(useLiveVue())` from the new
+  `live_vue_contract` npm package (in the Hex package, `"file:./deps/live_vue_contract"`) types
+  `pushEvent` on the client, so replies need no `as`. The generator writes the declarations to
+  `"$events"` of the contract, crediting each to every component that imports it at runtime.
+  `use LiveVueContract` wraps `handle_event/3` of LiveViews and LiveComponents when validation is on
+  at compile time and checks the params, the reply (after a JSON round trip) and a missing reply.
+- **Coverage.** `LiveVueContract.Coverage.start()` in `test_helper.exs` prints which `<.vue>`
+  components no test rendered and which declared events no test pushed.
+- A discriminated union (`{ ok: true } | { ok: false; error: string }`) is reported against the
+  alternative its literal key picks, not the first one with as many errors.
+- Error messages for props read "props of <.vue v-component=…> does not match defineProps in
+  <key>.vue" and name the resolved contract key.
+- The Mix compiler also hashes scripts under `:vue_root` that import "live_vue_contract", so a new
+  `useLiveEvents` regenerates the contract.
+
 ## 0.3.1 — 2026-11-01
 
 - `.heex` files are checked by `use LiveVueContract` itself: templates from `embed_templates` and a

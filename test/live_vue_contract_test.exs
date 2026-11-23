@@ -62,6 +62,28 @@ defmodule LiveVueContractTest do
     assert msg =~ "expected null | object"
   end
 
+  test "a discriminated union reports against the alternative its tag picks" do
+    schema = %{
+      "anyOf" => [
+        %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"enum" => [true]}},
+          "required" => ["ok"]
+        },
+        %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"enum" => [false]}, "error" => %{"type" => "string"}},
+          "required" => ["ok", "error"]
+        }
+      ]
+    }
+
+    assert Schema.validate(schema, %{ok: false, error: "e"}) == []
+
+    assert [{:error, "/error", "missing required key"}, {:warn, "/message", _}] =
+             Schema.validate(schema, %{ok: false, message: "e"})
+  end
+
   test "string where number expected" do
     assert [{:error, "/items/0/n", msg}] =
              Schema.validate(@schema, %{items: [%{id: "1", label: "l", n: "3"}], on: false})

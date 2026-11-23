@@ -1,7 +1,7 @@
 defmodule LiveVueContract.MixProject do
   use Mix.Project
 
-  @version "0.3.1"
+  @version "0.4.0"
   @source_url "https://github.com/Egorrko/live_vue_contract"
 
   def project do
@@ -52,7 +52,8 @@ defmodule LiveVueContract.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib priv/gen.mjs mix.exs README.md CHANGELOG.md LICENSE)
+      files:
+        ~w(lib priv/gen.mjs assets/index.js assets/index.d.ts package.json mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 end

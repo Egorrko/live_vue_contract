@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.2 — 2026-11-24
 
 - **Contract without fallthrough attributes.** With `vueCompilerOptions.fallthroughAttributes` on
   in the host's tsconfig, vue-component-meta listed every attribute of a component's root element as

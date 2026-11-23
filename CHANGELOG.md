@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — unreleased
+## 0.4.0 — 2026-11-23
 
 - **Events.** `useLiveEvents<{ name: { payload; reply } }>(useLiveVue())` from the new
   `live_vue_contract` npm package (in the Hex package, `"file:./deps/live_vue_contract"`) types

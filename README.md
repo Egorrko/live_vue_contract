@@ -69,7 +69,7 @@ end
 defp deps do
   [
     ...,
-    {:live_vue_contract, "~> 0.3"}
+    {:live_vue_contract, "~> 0.4"}
   ]
 end
 ```

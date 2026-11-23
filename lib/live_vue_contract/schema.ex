@@ -15,6 +15,8 @@ defmodule LiveVueContract.Schema do
   @sources "$sources"
   # Named types shared by components (0.3.0+), referenced from schemas as `{"$ref": name}`.
   @defs "$defs"
+  # Events declared with `useLiveEvents<...>()` (0.4.0+): name -> variants.
+  @events "$events"
 
   @doc "Path of the contract file, relative to the host app's cwd."
   def path, do: Application.get_env(:live_vue_contract, :contract, "assets/vue/contract.json")
@@ -25,29 +27,33 @@ defmodule LiveVueContract.Schema do
   @doc "Named types the schemas refer to with `{\"$ref\": name}`."
   def defs, do: load() |> elem(1)
 
+  @doc """
+  Events declared with `useLiveEvents<...>()`: event name -> list of variants
+  `%{"payload" => schema, "reply" => schema | nil, "components" => [key], "declared" => [file]}`.
+  One event name has several variants when components declare it with different types.
+  """
+  def events, do: load() |> elem(2)
+
   defp load do
     path = path()
 
     case File.stat(path) do
       {:ok, %{mtime: mtime}} ->
         case :persistent_term.get({__MODULE__, path}, nil) do
-          {^mtime, schemas, defs} ->
-            {schemas, defs}
+          {^mtime, schemas, defs, events} ->
+            {schemas, defs, events}
 
           _ ->
-            {defs, schemas} =
-              path
-              |> File.read!()
-              |> JSON.decode!()
-              |> Map.delete(@sources)
-              |> Map.pop(@defs, %{})
+            contract = path |> File.read!() |> JSON.decode!() |> Map.delete(@sources)
+            {defs, contract} = Map.pop(contract, @defs, %{})
+            {events, schemas} = Map.pop(contract, @events, %{})
 
-            :persistent_term.put({__MODULE__, path}, {mtime, schemas, defs})
-            {schemas, defs}
+            :persistent_term.put({__MODULE__, path}, {mtime, schemas, defs, events})
+            {schemas, defs, events}
         end
 
       _ ->
-        {%{}, %{}}
+        {%{}, %{}, %{}}
     end
   end
 
@@ -59,6 +65,14 @@ defmodule LiveVueContract.Schema do
   Matches by path suffix with `index` segments ignored, exactly like `findComponent` in LiveVue's JS.
   """
   def fetch(name) do
+    case resolve(name) do
+      {:ok, _key, schema} -> {:ok, schema}
+      other -> other
+    end
+  end
+
+  @doc "Like `fetch/1`, with the contract key the name resolved to: `{:ok, key, schema}`."
+  def resolve(name) do
     parts =
       name
       |> String.replace_suffix(".vue", "")
@@ -69,7 +83,7 @@ defmodule LiveVueContract.Schema do
       for {key, schema} <- all(), suffix?(key_parts(key), parts), do: {key, schema}
 
     case matches do
-      [{_key, schema}] -> {:ok, schema}
+      [{key, schema}] -> {:ok, key, schema}
       [] -> :error
       many -> {:ambiguous, many |> Enum.map(&elem(&1, 0)) |> Enum.sort()}
     end
@@ -123,16 +137,22 @@ defmodule LiveVueContract.Schema do
   end
 
   defp do_validate(%{"anyOf" => alts}, v, p, d) do
-    # the alternative with the fewest errors decides: none -> keep its warnings, some -> one union message
+    # the alternative with the fewest errors (then warnings) decides: none -> keep its warnings, some -> one union message
     # an alternative the value matched structurally (errors only inside) beats one it did not
-    # match at all, then fewer errors wins
+    # match at all; then one whose literal keys agree with the value (`ok: false` picks
+    # `{ ok: false; error: string }` out of a discriminated union); then fewer errors
     best =
       alts
-      |> Enum.map(&do_validate(&1, v, p, d))
-      |> Enum.min_by(fn problems ->
+      |> Enum.map(&{&1, do_validate(&1, v, p, d)})
+      |> Enum.min_by(fn {alt, problems} ->
         errors = Enum.filter(problems, &match?({:error, _, _}, &1))
-        {Enum.any?(errors, fn {_, path, _} -> path == p end), length(errors)}
+
+        # last, fewer unknown keys: `Partial<A> | Partial<B>` all match with no errors, the
+        # branch that declares the keys the value carries is the one meant
+        {Enum.any?(errors, fn {_, path, _} -> path == p end), discriminant_mismatch?(alt, v, d),
+         length(errors), length(problems) - length(errors)}
       end)
+      |> elem(1)
 
     if Enum.any?(best, &match?({:error, ^p, _}, &1)),
       do: [{:error, p, "expected #{describe(%{"anyOf" => alts}, d)}, got #{short(v)}"}],
@@ -141,9 +161,7 @@ defmodule LiveVueContract.Schema do
 
   # atoms other than nil/booleans go on the wire as strings
   defp do_validate(%{"enum" => allowed}, v, p, _d) do
-    wire = if is_atom(v) and v not in [nil, true, false], do: Atom.to_string(v), else: v
-
-    if wire in allowed,
+    if wire(v) in allowed,
       do: [],
       else: [{:error, p, "expected one of #{inspect(allowed)}, got #{short(v)}"}]
   end
@@ -193,6 +211,24 @@ defmodule LiveVueContract.Schema do
   defp do_validate(%{"type" => "boolean"}, v, _p, _d) when is_boolean(v), do: []
   defp do_validate(%{"type" => "null"}, nil, _p, _d), do: []
   defp do_validate(s, v, p, d), do: [{:error, p, "expected #{describe(s, d)}, got #{short(v)}"}]
+
+  # an object alternative with a single-literal property (a union tag) the value disagrees with
+  defp discriminant_mismatch?(%{"$ref" => name}, v, d),
+    do: discriminant_mismatch?(Map.get(d, name, %{}), v, d)
+
+  defp discriminant_mismatch?(%{"type" => "object", "properties" => props}, %{} = v, _d) do
+    v = Map.new(v, fn {k, val} -> {to_string(k), val} end)
+
+    Enum.any?(props, fn
+      {k, %{"enum" => [literal]}} -> Map.has_key?(v, k) and wire(v[k]) != literal
+      _ -> false
+    end)
+  end
+
+  defp discriminant_mismatch?(_alt, _v, _d), do: false
+
+  defp wire(v) when is_atom(v) and v not in [nil, true, false], do: Atom.to_string(v)
+  defp wire(v), do: v
 
   defp extra_key(%{"additionalProperties" => sub}, k, val, p, d),
     do: do_validate(sub, val, p <> "/" <> k, d)

@@ -122,6 +122,12 @@ function toSchema(type, checker, stack) {
   return objectSchema(type, checker, [...stack, type])
 }
 
+function acceptsUndefined(type) {
+  const F = ts.TypeFlags
+  const types = type.isUnion() ? type.types : [type]
+  return types.some(t => t.flags & (F.Any | F.Unknown | F.Undefined | F.Void))
+}
+
 function objectSchema(type, checker, inner) {
   const F = ts.TypeFlags
   const properties = {}
@@ -130,7 +136,9 @@ function objectSchema(type, checker, inner) {
   for (const prop of checker.getPropertiesOfType(type)) {
     for (const d of prop.getDeclarations() ?? []) track(d.getSourceFile().fileName)
     properties[prop.name] = toSchema(checker.getTypeOfSymbol(prop), checker, inner)
-    if (!(prop.flags & ts.SymbolFlags.Optional)) required.push(prop.name)
+    const propType = checker.getTypeOfSymbol(prop)
+    // `x: unknown` / `x: T | undefined`: JSON drops undefined, so on the wire the key may be absent
+    if (!(prop.flags & ts.SymbolFlags.Optional) && !acceptsUndefined(propType)) required.push(prop.name)
   }
 
   const schema = { type: "object", properties, required }
@@ -181,18 +189,130 @@ function* vueFiles(dir) {
 }
 
 const contract = {}
+const componentFiles = new Map() // contract key -> absolute path
 for (const root of roots) {
   for (const file of vueFiles(root)) {
-    contract[path.relative(root, file).replace(/\.vue$/, "")] = componentSchema(file)
+    const key = path.relative(root, file).replace(/\.vue$/, "")
+    contract[key] = componentSchema(file)
+    componentFiles.set(key, path.resolve(file))
     track(file)
   }
 }
 
+// ---- Events: `useLiveEvents<{ name: { payload; reply } }>()` from the "live_vue_contract" package ----
+//
+// A declaration belongs to the file it is written in. The server only knows which root component
+// it rendered, so every component is credited with the declarations reachable through its runtime
+// imports (a child component, a composable). Same event name, same shape: one entry; another shape
+// in another component: a separate entry, picked on the server by the component that was rendered.
+
+const program = checker.getProgram()
+const tc = program.getTypeChecker()
+const inProject = file => {
+  const rel = path.relative(process.cwd(), file)
+  return !rel.startsWith("..") && !path.isAbsolute(rel) && !rel.split(path.sep).includes("node_modules")
+}
+const rel = file => path.relative(process.cwd(), file)
+
+function isUseLiveEvents(call) {
+  let sym = tc.getSymbolAtLocation(call.expression)
+  if (sym && sym.flags & ts.SymbolFlags.Alias) sym = tc.getAliasedSymbol(sym)
+  return !!sym && sym.getName() === "useLiveEvents" &&
+    (sym.getDeclarations() ?? []).some(d => /[\\/]live_vue_contract[\\/]/.test(d.getSourceFile().fileName) || /[\\/]live_vue_contract[\\/]/.test(realPath(d.getSourceFile().fileName)))
+}
+
+function realPath(file) {
+  try { return ts.sys.realpath ? ts.sys.realpath(file) : file } catch { return file }
+}
+
+function walk(node, visit) {
+  visit(node)
+  ts.forEachChild(node, child => walk(child, visit))
+}
+
+const NO_PAYLOAD = { type: "object", properties: {}, required: [] }
+
+// file -> [{ event, payload, reply }]
+const declared = new Map()
+// file -> [resolved project files it imports at runtime]
+const imports = new Map()
+
+for (const sf of program.getSourceFiles()) {
+  if (!inProject(sf.fileName)) continue
+  const deps = []
+  const decls = []
+  walk(sf, node => {
+    let spec = null
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      const typeOnly = ts.isImportDeclaration(node) ? node.importClause?.isTypeOnly : node.isTypeOnly
+      if (!typeOnly) spec = node.moduleSpecifier
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
+      spec = node.arguments[0]
+    }
+    if (spec) {
+      const target = program.getResolvedModuleFromModuleSpecifier(spec, sf)?.resolvedModule?.resolvedFileName
+      if (target && inProject(target)) deps.push(path.resolve(target))
+    }
+
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && isUseLiveEvents(node)) {
+      const arg = node.typeArguments?.[0]
+      if (!arg) throw new Error(`live_vue_contract: useLiveEvents() without a type argument in ${rel(sf.fileName)}`)
+      const map = tc.getTypeFromTypeNode(arg)
+      for (const prop of tc.getPropertiesOfType(map)) {
+        const spec = tc.getTypeOfSymbol(prop)
+        const part = name => {
+          const sym = spec.getProperty(name)
+          return sym ? toSchema(tc.getTypeOfSymbol(sym), tc, []) : null
+        }
+        decls.push({ event: prop.name, payload: part("payload") ?? NO_PAYLOAD, reply: part("reply") })
+      }
+    }
+  })
+  imports.set(path.resolve(sf.fileName), deps)
+  if (decls.length) declared.set(path.resolve(sf.fileName), decls)
+}
+
+// declaring files reachable from `file` through runtime imports; files on a path to one are
+// sources of the contract too (an import that adds or drops a child changes it)
+const reach = new Map()
+function reachable(file, seen = new Set()) {
+  if (reach.has(file)) return reach.get(file)
+  if (seen.has(file)) return new Set()
+  seen.add(file)
+  const out = new Set(declared.has(file) ? [file] : [])
+  for (const dep of imports.get(file) ?? []) for (const f of reachable(dep, seen)) out.add(f)
+  // a result computed inside a cycle may be partial; cache only from the outermost call
+  if (seen.size === 1) reach.set(file, out)
+  return out
+}
+
+const events = {}
+for (const [key, file] of componentFiles) {
+  const files = reachable(file)
+  if (files.size) {
+    track(file)
+    for (const dep of imports.get(file) ?? []) if (reachable(dep).size) track(dep)
+  }
+  for (const f of files) {
+    track(f)
+    for (const d of declared.get(f)) {
+      const variants = (events[d.event] ??= [])
+      const shape = JSON.stringify([d.payload, d.reply])
+      let v = variants.find(x => JSON.stringify([x.payload, x.reply]) === shape)
+      if (!v) variants.push((v = { payload: d.payload, reply: d.reply, components: [], declared: [] }))
+      if (!v.components.includes(key)) v.components.push(key)
+      if (!v.declared.includes(rel(f))) v.declared.push(rel(f))
+    }
+  }
+}
+for (const variants of Object.values(events)) for (const v of variants) { v.components.sort(); v.declared.sort() }
+
 const sortKeys = o => Object.fromEntries(Object.keys(o).sort().map(k => [k, o[k]]))
 const sorted = sortKeys(contract)
 if (Object.keys(defs).length) sorted.$defs = sortKeys(defs)
+if (Object.keys(events).length) sorted.$events = sortKeys(events)
 const json = JSON.stringify(sorted, null, 2) + "\n"
 const same = existsSync(out) && readFileSync(out, "utf8") === json
 if (!same) writeFileSync(out, json)
 writeFileSync(depsOut, JSON.stringify([...deps].sort()) + "\n")
-console.log(`live_vue_contract: ${Object.keys(contract).length} components -> ${out}${same ? " (unchanged)" : ""}`)
+console.log(`live_vue_contract: ${Object.keys(contract).length} components, ${Object.keys(events).length} events -> ${out}${same ? " (unchanged)" : ""}`)

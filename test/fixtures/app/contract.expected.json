@@ -1,4 +1,15 @@
 {
+  "Board": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "title"
+    ]
+  },
   "Kitchen": {
     "type": "object",
     "properties": {
@@ -168,6 +179,11 @@
       "anything"
     ]
   },
+  "Other": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  },
   "nested/Card": {
     "type": "object",
     "properties": {
@@ -333,5 +349,116 @@
         "id"
       ]
     }
+  },
+  "$events": {
+    "refresh": [
+      {
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "reply": {
+          "type": "object",
+          "properties": {
+            "authors": {
+              "type": "array",
+              "items": {
+                "$ref": "Author"
+              }
+            },
+            "extra": {
+              "type": "any"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "authors"
+          ]
+        },
+        "components": [
+          "Board"
+        ],
+        "declared": [
+          "assets/vue/board.ts"
+        ]
+      }
+    ],
+    "save": [
+      {
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "number"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "reply": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "components": [
+          "Board",
+          "nested/Card"
+        ],
+        "declared": [
+          "assets/vue/nested/Card.vue"
+        ]
+      },
+      {
+        "payload": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "reply": null,
+        "components": [
+          "Other"
+        ],
+        "declared": [
+          "assets/vue/Other.vue"
+        ]
+      }
+    ]
   }
 }

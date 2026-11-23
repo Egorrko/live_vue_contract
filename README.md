@@ -21,6 +21,9 @@ against it. Nothing is described a second time.
 | string where TS says `number`, `null` where TS says non-nullable, value outside a union of literals | `mix test`, dev runtime |
 | wrong value inside a `Record<string, T>`, an index signature, `Partial<T>`, `Pick<T, K>`, a recursive type | `mix test`, dev runtime |
 | server sends a key the TS type does not know | warning in the log (`strict: true` makes it an error) |
+| `pushEvent` sends a payload `useLiveEvents` does not declare (renamed key, wrong type) | `mix test`, dev runtime |
+| `handle_event` replies with a map the declared reply type does not match, or with `{:noreply, socket}` | `mix test`, dev runtime |
+| a component or an event no test exercises | report at the end of `mix test` (`LiveVueContract.Coverage`) |
 
 "`mix test`" means: any live test that renders the screen. "dev runtime" means: the first render in
 `mix phx.server` raises with the JSON path of the problem.
@@ -66,7 +69,7 @@ end
 defp deps do
   [
     ...,
-    {:live_vue_contract, "~> 0.3"}
+    {:live_vue_contract, "~> 0.4"}
   ]
 end
 ```
@@ -89,6 +92,64 @@ keep that behaviour with:
 
 ```elixir
 use LiveVueContract, shared_props: true
+```
+
+## Events
+
+The same holds for what a component sends with `pushEvent` and what `handle_event` answers. Declare
+the events once, in TypeScript, with the `live_vue_contract` npm package that ships with the Hex
+package:
+
+```json
+// package.json
+"live_vue_contract": "file:./deps/live_vue_contract"
+```
+
+```ts
+import { useLiveVue } from "live_vue"
+import { useLiveEvents } from "live_vue_contract"
+
+type Reply = { ok: true } | { ok: false; error: string }
+
+const live = useLiveEvents<{
+  save_rank: { payload: { id: string | null; name: string }; reply: Reply }
+  refresh: { reply: Reply }            // no payload
+  leave: { payload: { reason: string } } // {:noreply, socket}
+}>(useLiveVue())
+
+const reply = await live.pushEvent("save_rank", { id: null, name: "x" }) // Reply, no `as`
+```
+
+The generator reads the type argument into `"$events"` of the contract. `use LiveVueContract` wraps
+`handle_event/3` of every LiveView and LiveComponent (only when validation is on at compile time, so
+a release has no wrapper at all) and checks:
+
+- the params against `payload`;
+- `{:reply, map, socket}` against `reply`, after a JSON round trip (what the client receives);
+- `{:noreply, socket}` for an event that declares a reply: an error, the client would wait forever.
+
+An event is checked in a LiveView process only when a Vue component rendered there declares it,
+directly or through a child component or composable it imports. So a `phx-click="save"` on a page
+with no such component is not touched, and two components may declare `save` with different types:
+the one that was rendered decides. Two components rendered together that disagree are an error.
+
+A test that calls `render_hook(view, "save_rank", %{"name" => "x"})` now has to send what the client
+sends. That is the point: a test that pushes a payload the real client never sends tests a client
+that does not exist.
+
+## Coverage
+
+The nested checks see only what tests render and push. To see what they never saw:
+
+```elixir
+# test/test_helper.exs
+LiveVueContract.Coverage.start()
+ExUnit.start()
+```
+
+```
+live_vue_contract: 20 of 20 <.vue> components rendered, 6 of 7 events pushed
+  never pushed: refresh (assets/vue/RolesAdmin.vue)
 ```
 
 ## Configuration
@@ -146,7 +207,10 @@ the log is clean. `strict: true` turns "server sends a key the type does not kno
   `Record`, `Partial`, `Pick`, your own generics — are expanded.)
 - **Distinctions JSON does not make.** `Date` and `DateTime` are both `string`; `integer` and `float`
   are both `number`.
-- **Events.** `pushEvent` / `handle_event` and `push_event` / `useLiveEvent` are not covered.
+- **Events from the server.** `push_event` / `useLiveEvent` are not covered; `pushEvent` /
+  `handle_event` are, for events declared with `useLiveEvents`.
+- **Events no test pushes.** Like props, events are checked on what the tests send; the coverage
+  report lists the rest.
 
 ## Requirements
 

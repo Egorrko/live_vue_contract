@@ -13,7 +13,7 @@ defmodule LiveVueContract.Tags do
   alias LiveVueContract.Schema
 
   @doc """
-  Checks the compiled template `ast`. Options: `:file`, `:line` (where the template starts),
+  Checks the compiled template `ast` and returns the literal component names it found. Options: `:file`, `:line` (where the template starts),
   `:source` (template text; `nil` skips the count), `:shortcuts` (names of `<.X>` shortcut tags).
   """
   def check!(ast, opts) do
@@ -26,7 +26,7 @@ defmodule LiveVueContract.Tags do
       count!(opts[:source], length(tags), shortcuts, opts)
     end
 
-    :ok
+    for {:literal, name, _kw, _line} <- tags, uniq: true, do: name
   end
 
   # {:literal, name, attribute keyword, line}: literal attributes and a literal v-component

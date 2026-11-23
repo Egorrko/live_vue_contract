@@ -58,6 +58,8 @@ defmodule LiveVueContract do
       Keyword.get(opts, :shared_props, false)
     )
 
+    Module.register_attribute(__CALLER__.module, :live_vue_contract_tags, accumulate: true)
+
     shortcuts =
       for name <- names do
         quote do
@@ -98,12 +100,44 @@ defmodule LiveVueContract do
       |> Enum.uniq()
       |> Enum.filter(&File.regular?/1)
 
-    for path <- files,
-        source = File.read!(path),
-        LiveVueContract.Tags.mentions?(source, shortcuts),
-        do: check_heex!(path, source, env, shortcuts)
+    heex_tags =
+      for path <- files,
+          source = File.read!(path),
+          LiveVueContract.Tags.mentions?(source, shortcuts),
+          name <- check_heex!(path, source, env, shortcuts),
+          do: name
 
-    :ok
+    tags =
+      (heex_tags ++ List.wrap(Module.get_attribute(env.module, :live_vue_contract_tags)))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    quote do
+      @doc false
+      def __live_vue_tags__, do: unquote(tags)
+
+      unquote(wrap_handle_event(env))
+    end
+  end
+
+  # handle_event/3 of a LiveView or LiveComponent, wrapped to check events declared with
+  # `useLiveEvents` (LiveVueContract.Events). Not compiled in when validation is off at compile
+  # time, so a release pays nothing.
+  defp wrap_handle_event(env) do
+    behaviours = List.wrap(Module.get_attribute(env.module, :behaviour))
+
+    if validate?() and Module.defines?(env.module, {:handle_event, 3}, :def) and
+         Enum.any?(behaviours, &(&1 in [Phoenix.LiveView, Phoenix.LiveComponent])) do
+      quote do
+        defoverridable handle_event: 3
+
+        def handle_event(event, params, socket) do
+          LiveVueContract.Events.handle(__MODULE__, event, params, fn ->
+            super(event, params, socket)
+          end)
+        end
+      end
+    end
   end
 
   defp template_name(module),
@@ -146,12 +180,15 @@ defmodule LiveVueContract do
           description: "could not expand ~H"
         )
 
-    LiveVueContract.Tags.check!(ast,
-      source: template_source(template),
-      file: caller.file,
-      line: caller.line,
-      shortcuts: Module.get_attribute(caller.module, :live_vue_shortcuts) || []
-    )
+    names =
+      LiveVueContract.Tags.check!(ast,
+        source: template_source(template),
+        file: caller.file,
+        line: caller.line,
+        shortcuts: Module.get_attribute(caller.module, :live_vue_shortcuts) || []
+      )
+
+    for name <- names, do: Module.put_attribute(caller.module, :live_vue_contract_tags, name)
 
     ast
   end
@@ -167,24 +204,30 @@ defmodule LiveVueContract do
 
   # Deps compile with Mix.env() == :prod, so the default is decided at runtime: under Mix
   # (mix phx.server, mix test) in a non-prod env — validate; in a release there is no Mix — don't.
+  # true / :warn -> validate (raising or logging), false -> off
   defp validate? do
     Application.get_env(
       :live_vue_contract,
       :validate,
       function_exported?(Mix, :env, 0) and Mix.env() != :prod
-    )
+    ) not in [false, nil]
   end
 
   @doc false
   def validate!(%{"v-component": name} = assigns) when is_binary(name) do
-    case Schema.fetch(name) do
-      {:ok, schema} ->
+    case Schema.resolve(name) do
+      {:ok, key, schema} ->
+        LiveVueContract.Events.rendered(key)
+        LiveVueContract.Coverage.record(:component, key)
         {props, streams} = props(assigns)
 
         schema
         |> Map.update("required", [], &(&1 -- streams))
         |> Schema.validate(LiveVue.Encoder.encode(props))
-        |> report!(name)
+        |> LiveVueContract.Report.raise_or_warn!(
+          ~s|props of <.vue v-component=#{inspect(name)}>|,
+          "defineProps in #{key}.vue"
+        )
 
       :error ->
         if Schema.all() != %{},
@@ -203,44 +246,6 @@ defmodule LiveVueContract do
   end
 
   def validate!(_assigns), do: :ok
-
-  defp report!(problems, name) do
-    strict? = Application.get_env(:live_vue_contract, :strict, false)
-    warn_only? = Application.get_env(:live_vue_contract, :validate) == :warn
-
-    {errors, warnings} =
-      Enum.split_with(problems, fn {sev, _, _} ->
-        not warn_only? and (sev == :error or strict?)
-      end)
-
-    for {_sev, path, msg} <- warnings, warn_once?({name, path}) do
-      require Logger
-
-      Logger.warning(
-        "<.vue v-component=#{inspect(name)}> sends #{path}: #{msg} (defineProps in #{name}.vue)"
-      )
-    end
-
-    if errors != [] do
-      raise ArgumentError, """
-      props of <.vue v-component=#{inspect(name)}> do not match defineProps in #{name}.vue:
-
-      #{Enum.map_join(errors, "\n", fn {_sev, path, msg} -> "  #{path}: #{msg}" end)}
-      """
-    end
-  end
-
-  defp warn_once?({name, path}) do
-    # array paths differ only by index; collapse them so one warning per key, not per row
-    key = {name, Regex.replace(~r"/\d+(/|$)", path, "/N\\1")}
-
-    if :persistent_term.get({__MODULE__, key}, false) do
-      false
-    else
-      :persistent_term.put({__MODULE__, key}, true)
-      true
-    end
-  end
 
   # `{props to validate, names of props passed as LiveStreams}`: a stream is a delta, not the
   # value the TS type describes, so it is skipped rather than reported as missing.

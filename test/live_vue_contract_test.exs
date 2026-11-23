@@ -62,6 +62,43 @@ defmodule LiveVueContractTest do
     assert msg =~ "expected null | object"
   end
 
+  test "a union of partials picks the alternative that declares the value's keys" do
+    partial = fn keys ->
+      %{
+        "type" => "object",
+        "required" => [],
+        "properties" => Map.new(keys, &{&1, %{"type" => "number"}})
+      }
+    end
+
+    union = %{"anyOf" => [partial.(~w(x r)), partial.(~w(x arc rotation))]}
+
+    assert Schema.validate(union, %{"x" => 1, "arc" => 2, "rotation" => 3}, %{}) == []
+    assert [{:warn, "/zzz", _}] = Schema.validate(union, %{"x" => 1, "arc" => 2, "zzz" => 3}, %{})
+  end
+
+  test "a discriminated union reports against the alternative its tag picks" do
+    schema = %{
+      "anyOf" => [
+        %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"enum" => [true]}},
+          "required" => ["ok"]
+        },
+        %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"enum" => [false]}, "error" => %{"type" => "string"}},
+          "required" => ["ok", "error"]
+        }
+      ]
+    }
+
+    assert Schema.validate(schema, %{ok: false, error: "e"}) == []
+
+    assert [{:error, "/error", "missing required key"}, {:warn, "/message", _}] =
+             Schema.validate(schema, %{ok: false, message: "e"})
+  end
+
   test "string where number expected" do
     assert [{:error, "/items/0/n", msg}] =
              Schema.validate(@schema, %{items: [%{id: "1", label: "l", n: "3"}], on: false})

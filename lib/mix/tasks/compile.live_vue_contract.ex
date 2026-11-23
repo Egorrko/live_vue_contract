@@ -76,7 +76,7 @@ defmodule Mix.Tasks.Compile.LiveVueContract do
     watch = Application.get_env(:live_vue_contract, :watch, [])
 
     sources =
-      (vue_files ++ deps ++ Enum.flat_map(watch, &Path.wildcard/1))
+      (vue_files ++ deps ++ declaring_files() ++ Enum.flat_map(watch, &Path.wildcard/1))
       |> no_node_modules()
       |> Enum.uniq()
       |> Enum.sort()
@@ -94,6 +94,15 @@ defmodule Mix.Tasks.Compile.LiveVueContract do
           end)
       ]
     )
+  end
+
+  # Scripts under :vue_root that import the "live_vue_contract" npm package: a new
+  # `useLiveEvents` in a file no prop type comes from must regenerate the contract too.
+  defp declaring_files do
+    Application.get_env(:live_vue_contract, :vue_root, ["assets/vue"])
+    |> Enum.flat_map(&Path.wildcard("#{&1}/**/*.{ts,tsx,js,mjs}"))
+    |> no_node_modules()
+    |> Enum.filter(&(File.read!(&1) =~ "live_vue_contract"))
   end
 
   defp script, do: Path.join(:code.priv_dir(:live_vue_contract), "gen.mjs")

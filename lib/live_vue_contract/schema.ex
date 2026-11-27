@@ -124,6 +124,19 @@ defmodule LiveVueContract.Schema do
   defp suffix?(key_parts, parts),
     do: length(parts) <= length(key_parts) and Enum.take(key_parts, -length(parts)) == parts
 
+  @doc """
+  Prop names `LiveVue.SharedPropsView` injects into every tag (`config :live_vue, :shared_props`).
+  A component may leave them out of `defineProps`: Vue passes an undeclared prop on as an attribute.
+  """
+  def shared_props do
+    for entry <- Application.get_env(:live_vue, :shared_props, []) do
+      case entry do
+        {_source, target} -> to_string(target)
+        name -> to_string(name)
+      end
+    end
+  end
+
   @doc "Attribute names of a `<.vue>` tag that LiveVue would send as props."
   def prop_keys(keys) do
     keys
@@ -133,17 +146,35 @@ defmodule LiveVueContract.Schema do
 
   @doc """
   Compares attribute names with the schema. Returns `[]` or a list of problems.
-  `shared` are props injected by `LiveVue.SharedPropsView` (always present on the wire).
+  `shared` are props injected by `LiveVue.SharedPropsView` (always present on the wire): they
+  count as passed, and a component that does not declare them is fine.
   """
   def check_keys(%{"properties" => props} = schema, keys, shared \\ []) do
-    keys = prop_keys(keys) ++ Enum.map(shared, &to_string/1)
+    shared = Enum.map(shared, &to_string/1)
+    keys = prop_keys(keys)
     required = Map.get(schema, "required", [])
-    missing = required -- keys
-    extra = keys -- Map.keys(props)
+    missing = required -- (keys ++ shared)
+    extra = (keys -- shared) -- Map.keys(props)
 
     Enum.map(missing, &"missing required prop #{inspect(&1)}") ++
       Enum.map(extra, &"prop #{inspect(&1)} is not declared in defineProps")
   end
+
+  @doc """
+  Item schema of an array schema (through `$ref` and `T[] | null`), or `nil`.
+  """
+  def items(schema, defs \\ defs())
+  def items(%{"type" => "array"} = s, _defs), do: Map.get(s, "items", %{"type" => "any"})
+  def items(%{"$ref" => name}, defs), do: items(Map.get(defs, name), defs)
+
+  def items(%{"anyOf" => alts}, defs) do
+    case alts |> Enum.map(&items(&1, defs)) |> Enum.reject(&is_nil/1) do
+      [items] -> items
+      _ -> nil
+    end
+  end
+
+  def items(_schema, _defs), do: nil
 
   @doc """
   Validates an encoded (JSON-ready) props map.

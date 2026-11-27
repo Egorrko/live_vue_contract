@@ -113,6 +113,13 @@ defmodule LiveVueContractTest do
              Schema.check_keys(@schema, [:items, :total])
   end
 
+  test "shared props count as passed and need not be declared" do
+    assert Schema.check_keys(@schema, [:items, :flash], ["flash", "on"]) == []
+
+    assert ["prop \"total\" is not declared in defineProps"] =
+             Schema.check_keys(@schema, [:items, :on, :flash, :total], ["flash"])
+  end
+
   test "fetch resolves names like LiveVue's findComponent" do
     path =
       Path.join(System.tmp_dir!(), "live_vue_contract_#{System.unique_integer([:positive])}.json")

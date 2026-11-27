@@ -30,6 +30,7 @@ defineProps<{
   lookup: Map<string, number>
   callback: (x: number) => void
   anything: unknown
+  user_id: string & { readonly __brand: "UserId" }
 }>()
 </script>
 

@@ -22,7 +22,14 @@ const require = createRequire(path.resolve("package.json"))
 const { createCheckerByJson } = require("vue-component-meta")
 const ts = require("typescript")
 
+// our own errors explain themselves; a stack trace is for the unexpected ones
+process.on("uncaughtException", e => {
+  console.error(e?.message?.startsWith("live_vue_contract:") ? e.message : e)
+  process.exit(1)
+})
+
 const ANY = { type: "any" }
+const rel = file => path.relative(process.cwd(), file)
 const deps = new Set()
 
 function track(file) {
@@ -105,6 +112,14 @@ function toSchema(type, checker, stack) {
     return { type: "array", items: args.length ? union(args.map(t => toSchema(t, checker, stack))) : ANY }
   }
 
+  // a branded primitive (`string & { __brand: "UserId" }`) is the primitive on the wire; expanded
+  // as an object it listed every method of String as a required key, and no string passed
+  if (type.isIntersection()) {
+    const primitives = type.types.filter(t => !(t.flags & F.Object))
+    if (primitives.length === 1) return toSchema(primitives[0], checker, stack)
+    if (primitives.length > 1) return ANY
+  }
+
   if (!(f & F.Object) && !type.isIntersection()) return ANY
   if (type.getCallSignatures().length > 0 || type.getConstructSignatures().length > 0) return ANY
   if (opaqueLibType(type)) return ANY
@@ -177,7 +192,14 @@ function typeCheckerOf(prop, type) {
 }
 
 function componentSchema(file) {
-  const props = checker.getComponentMeta(path.resolve(file)).props.filter(p => !p.global)
+  let meta
+  try {
+    meta = checker.getComponentMeta(path.resolve(file))
+  } catch (e) {
+    if (!/is not part of the project/.test(e.message)) throw e
+    throw new Error(`live_vue_contract: ${file} is under vue_root but not in the files of ${tsconfig} ("include"), so its props have no types`)
+  }
+  const props = meta.props.filter(p => !p.global)
   const properties = {}
   const required = []
 
@@ -193,7 +215,7 @@ function componentSchema(file) {
 function* vueFiles(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
-    if (e.isDirectory()) yield* vueFiles(p)
+    if (e.isDirectory()) { if (e.name !== "node_modules") yield* vueFiles(p) }
     else if (e.name.endsWith(".vue")) yield p
   }
 }
@@ -203,6 +225,10 @@ const componentFiles = new Map() // contract key -> absolute path
 for (const root of roots) {
   for (const file of vueFiles(root)) {
     const key = path.relative(root, file).replace(/\.vue$/, "")
+    // keys are relative to their root, as `v-component` names are: the same path under two roots
+    // would make one of them silently checked against the other's props
+    if (componentFiles.has(key))
+      throw new Error(`live_vue_contract: ${rel(componentFiles.get(key))} and ${rel(file)} are both "${key}": rename one, v-component cannot tell them apart`)
     contract[key] = componentSchema(file)
     componentFiles.set(key, path.resolve(file))
     track(file)
@@ -222,7 +248,6 @@ const inProject = file => {
   const rel = path.relative(process.cwd(), file)
   return !rel.startsWith("..") && !path.isAbsolute(rel) && !rel.split(path.sep).includes("node_modules")
 }
-const rel = file => path.relative(process.cwd(), file)
 
 function isUseLiveEvents(call) {
   let sym = tc.getSymbolAtLocation(call.expression)

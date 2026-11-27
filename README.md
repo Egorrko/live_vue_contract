@@ -54,7 +54,8 @@ against it. Nothing is described a second time.
 3. `LiveVueContract.vue/1` replaces `LiveVue.vue/1`. In dev and test it encodes the props exactly as
    LiveVue would and validates them against the nested schema before rendering. On an update it
    validates only the props LiveView marks as changed: a prop that did not change passed on an
-   earlier render. In a release it is a pass-through.
+   earlier render. A LiveStream prop is checked item by item, as `stream_insert` adds them,
+   against the item type of its array. In a release it is a pass-through.
 
 ## Installation
 
@@ -132,7 +133,9 @@ a release has no wrapper at all) and checks:
 An event is checked in a LiveView process only when a Vue component rendered there declares it,
 directly or through a child component or composable it imports. So a `phx-click="save"` on a page
 with no such component is not touched, and two components may declare `save` with different types:
-the one that was rendered decides. Two components rendered together that disagree are an error.
+the one that was rendered decides. When both are rendered together, the declaration the params
+match applies, its reply type included; params that match neither are reported against the closer
+one.
 
 A test that calls `render_hook(view, "save_rank", %{"name" => "x"})` now has to send what the client
 sends. That is the point: a test that pushes a payload the real client never sends tests a client

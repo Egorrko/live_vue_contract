@@ -1,6 +1,24 @@
 # Changelog
 
-## 0.5.3 — 2026-11-27
+## 0.5.4 — 2026-11-27
+
+- **`use LiveVueContract, shared_props: true` works.** `LiveVue.SharedPropsView` injects the
+  shared props into every tag, and every component that did not declare them failed to compile
+  ("prop \"flash\" is not declared"). A shared prop now counts as passed and need not be declared,
+  at compile time and at render time (`strict: true` included).
+- **Branded types.** `string & { __brand: "UserId" }` became an object with every method of
+  `String` as a required key, so no string passed. A branded primitive is now the primitive.
+- **LiveStream props are checked.** They were skipped; now every item `stream_insert` adds is
+  checked against the item type of the prop's array, once, with its DOM id in the message.
+- **One event, two declarations on one page.** Two rendered components declaring `save` with
+  different types made every `save` an error. Now the declaration the params match applies, its
+  reply type included. `LiveVueContract.Events.variant/1` is replaced by `variants/1`.
+- The generator fails when two `vue_root`s hold the same relative path (`a/Panel.vue` and
+  `b/Panel.vue` are both `Panel`); one of them used to overwrite the other silently. It skips
+  `node_modules` under a root, and a `.vue` file outside the tsconfig's `include` is reported in
+  one line instead of a stack trace.
+
+## 0.5.3 — 2026-11-27 (not published on Hex; in 0.5.4)
 
 - **Render-time check of big props is cheap.** `vue/1` validated every prop on every render: 51 ms
   a render for 250 KB of props in `bench/render.exs`, and a LiveView that updates one tile at a time

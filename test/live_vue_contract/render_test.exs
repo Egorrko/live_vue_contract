@@ -63,6 +63,29 @@ defmodule LiveVueContract.RenderTest do
     end
   end
 
+  test "a shared prop the component does not declare is not reported" do
+    Application.put_env(:live_vue, :shared_props, [:flash, {:current_user, :user}])
+    Application.put_env(:live_vue_contract, :strict, true)
+    on_exit(fn -> Application.delete_env(:live_vue, :shared_props) end)
+
+    assert %Phoenix.LiveView.Rendered{} =
+             vue(%{title: "t", rows: [], flash: %{}, user: nil}, nil)
+  end
+
+  test "items a LiveStream inserts are checked against the array's item type" do
+    stream = Phoenix.LiveView.LiveStream.new(:rows, "ref", [], [])
+
+    ok = Phoenix.LiveView.LiveStream.insert_item(stream, %{id: 1, n: 5}, -1, nil, false)
+    # a stream of maps against number[]: each item is reported once, with its DOM id
+    error =
+      assert_raise ArgumentError, fn ->
+        vue(%{title: "t", rows: ok}, nil)
+      end
+
+    assert error.message =~ "/rows/N: expected number, got %{"
+    assert error.message =~ "(stream item rows-1)"
+  end
+
   test "a rewritten contract is read again, names resolved again" do
     assert {:ok, "Panel", _} = LiveVueContract.Schema.resolve("Panel")
     path = Application.fetch_env!(:live_vue_contract, :contract)

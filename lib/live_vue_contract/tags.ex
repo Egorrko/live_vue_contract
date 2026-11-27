@@ -14,7 +14,8 @@ defmodule LiveVueContract.Tags do
 
   @doc """
   Checks the compiled template `ast` and returns the literal component names it found. Options: `:file`, `:line` (where the template starts),
-  `:source` (template text; `nil` skips the count), `:shortcuts` (names of `<.X>` shortcut tags).
+  `:source` (template text; `nil` skips the count), `:shortcuts` (names of `<.X>` shortcut tags),
+  `:shared` (props `LiveVue.SharedPropsView` injected into every tag).
   """
   def check!(ast, opts) do
     shortcuts = Keyword.get(opts, :shortcuts, [])
@@ -22,7 +23,8 @@ defmodule LiveVueContract.Tags do
     tags = Enum.reverse(tags)
 
     if Schema.all() != %{} do
-      for {:literal, name, kw, line} <- tags, do: check_tag!(name, kw, opts, line)
+      shared = Keyword.get(opts, :shared, [])
+      for {:literal, name, kw, line} <- tags, do: check_tag!(name, kw, shared, opts, line)
       count!(opts[:source], length(tags), shortcuts, opts)
     end
 
@@ -59,11 +61,11 @@ defmodule LiveVueContract.Tags do
 
   defp tag(_attrs, _name, _meta), do: :dynamic
 
-  defp check_tag!(name, kw, opts, line) do
+  defp check_tag!(name, kw, shared, opts, line) do
     problems =
       case Schema.fetch(name) do
         {:ok, schema} ->
-          case Schema.check_keys(schema, Keyword.keys(kw)) do
+          case Schema.check_keys(schema, Keyword.keys(kw), shared) do
             [] -> nil
             problems -> "<.vue v-component=#{inspect(name)}>: " <> Enum.join(problems, "; ")
           end

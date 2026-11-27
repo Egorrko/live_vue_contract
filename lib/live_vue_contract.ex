@@ -164,10 +164,8 @@ defmodule LiveVueContract do
     caller = __CALLER__
     Module.put_attribute(caller.module, :external_resource, Path.expand(Schema.path()))
 
-    base =
-      if Module.get_attribute(caller.module, :live_vue_contract_shared_props),
-        do: LiveVue.SharedPropsView,
-        else: Phoenix.Component
+    shared? = Module.get_attribute(caller.module, :live_vue_contract_shared_props)
+    base = if shared?, do: LiveVue.SharedPropsView, else: Phoenix.Component
 
     call = quote(do: unquote(base).sigil_H(unquote(template), unquote(modifiers)))
     ast = Macro.expand_once(call, caller)
@@ -185,7 +183,8 @@ defmodule LiveVueContract do
         source: template_source(template),
         file: caller.file,
         line: caller.line,
-        shortcuts: Module.get_attribute(caller.module, :live_vue_shortcuts) || []
+        shortcuts: Module.get_attribute(caller.module, :live_vue_shortcuts) || [],
+        shared: if(shared?, do: Schema.shared_props(), else: [])
       )
 
     for name <- names, do: Module.put_attribute(caller.module, :live_vue_contract_tags, name)
@@ -219,12 +218,13 @@ defmodule LiveVueContract do
       {:ok, key, schema} ->
         LiveVueContract.Events.rendered(key)
         LiveVueContract.Coverage.record(:component, key)
-        {props, streams} = props(assigns)
+        {props, streams} = props(assigns, schema)
         {props, skip} = changed(schema, props, assigns)
 
         schema
-        |> Map.update("required", [], &(&1 -- (streams ++ skip)))
+        |> Map.update("required", [], &(&1 -- (Map.keys(streams) ++ skip)))
         |> Schema.validate(LiveVue.Encoder.encode(props))
+        |> Kernel.++(stream_inserts(schema, streams))
         |> LiveVueContract.Report.raise_or_warn!(
           ~s|props of <.vue v-component=#{inspect(name)}>|,
           "defineProps in #{key}.vue"
@@ -264,16 +264,33 @@ defmodule LiveVueContract do
 
   defp changed(_schema, props, _assigns), do: {props, []}
 
-  # `{props to validate, names of props passed as LiveStreams}`: a stream is a delta, not the
-  # value the TS type describes, so it is skipped rather than reported as missing.
-  defp props(assigns) do
-    keys = assigns |> Map.keys() |> Schema.prop_keys()
+  # A LiveStream prop is a delta, not the array the TS type describes: what is checked is each item
+  # this render inserts, against the item type of that array. Inserts are emptied after a render,
+  # so every item is checked once. The path reads /prop/N; the message names the item's DOM id.
+  defp stream_inserts(schema, streams) do
+    for {name, %Phoenix.LiveView.LiveStream{inserts: inserts}} <- streams,
+        items = Schema.items(get_in(schema, ["properties", name])),
+        items != nil,
+        {dom_id, _at, item, _limit, _update_only} <- Enum.reverse(inserts),
+        {severity, path, message} <- Schema.validate(items, LiveVue.Encoder.encode(item)) do
+      {severity, "/#{name}/N" <> path, "#{message} (stream item #{dom_id})"}
+    end
+  end
+
+  # `{props to validate, %{name => LiveStream}}`: streams are checked by `stream_inserts/2`,
+  # not reported as missing.
+  # Shared props (`LiveVue.SharedPropsView`) the component does not declare are left out: Vue
+  # passes them on as attributes.
+  defp props(assigns, schema) do
+    declared = Map.get(schema, "properties", %{})
+    undeclared_shared = Enum.reject(Schema.shared_props(), &Map.has_key?(declared, &1))
+    keys = (assigns |> Map.keys() |> Schema.prop_keys()) -- undeclared_shared
 
     {streams, values} =
       assigns
       |> Enum.filter(fn {k, v} -> to_string(k) in keys and not match?([%{__slot__: _}], v) end)
       |> Enum.split_with(fn {_k, v} -> is_struct(v, Phoenix.LiveView.LiveStream) end)
 
-    {Map.new(values), Enum.map(streams, fn {k, _} -> to_string(k) end)}
+    {Map.new(values), Map.new(streams, fn {k, v} -> {to_string(k), v} end)}
   end
 end

@@ -36,43 +36,40 @@ defmodule LiveVueContract.Events do
     reply!(module, event, variant, result)
   end
 
-  @doc "The declaration of `event` that applies in this process, or `nil`."
-  def variant(event) do
+  @doc """
+  The declarations of `event` that apply in this process: those of the components it rendered.
+  Usually one; several when components rendered together declare the event with different types.
+  """
+  def variants(event) do
     with variants when is_list(variants) <- Map.get(Schema.events(), event),
          rendered when rendered != %MapSet{} <- Process.get(@rendered, MapSet.new()) do
-      case Enum.filter(variants, fn v ->
-             Enum.any?(v["components"], &MapSet.member?(rendered, &1))
-           end) do
-        [] ->
-          nil
-
-        [variant] ->
-          variant
-
-        many ->
-          raise ArgumentError, """
-          event #{inspect(event)} is declared with different types by components rendered in the \
-          same LiveView, so its payload cannot be checked:
-
-          #{Enum.map_join(many, "\n", &"  #{Enum.join(&1["declared"], ", ")}")}
-          """
-      end
+      Enum.filter(variants, fn v -> Enum.any?(v["components"], &MapSet.member?(rendered, &1)) end)
     else
-      _ -> nil
+      _ -> []
     end
   end
 
+  # The declaration the params match decides, and its reply type checks the reply: two components
+  # on one page may each push `save` with their own payload. Params that match none are reported
+  # against the declaration they come closest to.
   defp payload!(module, event, params) do
-    case variant(event) do
-      nil ->
+    case variants(event) do
+      [] ->
         nil
 
-      variant ->
+      variants ->
         Coverage.record(:event, event)
 
-        variant["payload"]
-        |> Schema.validate(params)
-        |> Report.raise_or_warn!(
+        {variant, problems} =
+          variants
+          |> Enum.map(&{&1, Schema.validate(&1["payload"], params)})
+          |> Enum.min_by(fn {_variant, problems} ->
+            errors = Enum.count(problems, &match?({:error, _, _}, &1))
+            {errors, length(problems) - errors}
+          end)
+
+        Report.raise_or_warn!(
+          problems,
           ~s|the payload of pushEvent(#{inspect(event)}) to #{inspect(module)}|,
           "the payload type in useLiveEvents of #{declared(variant)}"
         )

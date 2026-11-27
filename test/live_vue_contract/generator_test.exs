@@ -112,13 +112,16 @@ defmodule LiveVueContract.GeneratorTest do
       when: "2026-01-01",
       lookup: %{},
       callback: nil,
-      anything: [1]
+      anything: [1],
+      user_id: "u1"
     }
 
     defp problems(change), do: Schema.validate(Schema.all()["Kitchen"], Map.merge(@valid, change))
 
     test "a value matching every prop passes" do
       assert problems(%{}) == []
+      # a branded string is a string on the wire
+      assert [{:error, "/user_id", _}] = problems(%{user_id: 1})
       assert problems(%{note: "n", flag: true, settings: %{}}) == []
     end
 

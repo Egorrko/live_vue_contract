@@ -124,14 +124,21 @@ defmodule LiveVueContract.EventsTest do
     end
   end
 
-  test "two rendered components declaring one event differently is an error" do
+  test "two rendered components declaring one event differently: the params pick the declaration" do
     mod = live_view()
     Events.rendered("nested/Card")
     Events.rendered("Other")
 
-    assert_raise ArgumentError, ~r/declared with different types/, fn ->
-      push(mod, "save", %{"id" => 1}, {:noreply, nil})
-    end
+    # Other's save, no reply declared
+    assert {:noreply, _} = push(mod, "save", %{"name" => "n"}, {:noreply, nil})
+
+    # Card's save: its reply type applies
+    e = assert_raise ArgumentError, fn -> push(mod, "save", %{"id" => 1}, {:noreply, nil}) end
+    assert e.message =~ "the client awaits a reply"
+
+    # neither: reported against the closer one
+    e = assert_raise ArgumentError, fn -> push(mod, "save", %{"id" => "1"}, {:noreply, nil}) end
+    assert e.message =~ "/id: expected number"
   end
 
   test "events nobody rendered declares, and pages without Vue components, are left alone" do

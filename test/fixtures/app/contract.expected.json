@@ -148,6 +148,9 @@
       },
       "anything": {
         "type": "any"
+      },
+      "user_id": {
+        "type": "string"
       }
     },
     "required": [
@@ -176,7 +179,8 @@
       "when",
       "lookup",
       "callback",
-      "anything"
+      "anything",
+      "user_id"
     ]
   },
   "Other": {

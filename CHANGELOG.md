@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.3 — 2026-11-27
+
+- **Render-time check of big props is cheap.** `vue/1` validated every prop on every render: 51 ms
+  a render for 250 KB of props in `bench/render.exs`, and a LiveView that updates one tile at a time
+  queued its events behind seconds of checks. Now:
+  - an update validates only the props in `__changed__` (0.02 ms when a small prop changed); the
+    first render and renders without change tracking (`<.vue {@rest}>`, comprehensions) validate
+    all of them, and a required prop absent on an update is still an error;
+  - the validator builds no messages and paths for union alternatives it drops; it inspected each
+    losing value (`T | null` with a big `T`) and that cost more than the check itself. A full
+    check of 250 KB takes 10 ms, close to LiveVue's own encoding of the same props (12 ms);
+  - a union stops at the first alternative that matches cleanly;
+  - an error message shows at most 60 characters of the value without inspecting it whole;
+  - the component a `v-component` name resolves to is remembered in the LiveView process: matching
+    against every contract key took 0.1 ms a render with 200 components.
+- The contract is read again when its size changes, not only its mtime: a rewrite within the same
+  second is no longer missed.
+
 ## 0.5.2 — 2026-11-24
 
 - **Contract without fallthrough attributes.** With `vueCompilerOptions.fallthroughAttributes` on

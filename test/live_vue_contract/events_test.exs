@@ -180,10 +180,12 @@ defmodule LiveVueContract.EventsTest do
     on_exit(fn -> File.rm_rf!(Coverage.dir()) end)
 
     :persistent_term.put({Coverage, :on}, true)
+
     on_exit(fn ->
       :persistent_term.erase({Coverage, :on})
       :persistent_term.erase({Coverage, :event, "refresh"})
     end)
+
     Coverage.record(:event, "refresh")
     path = Coverage.export("partition_1")
 

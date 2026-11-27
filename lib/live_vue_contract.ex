@@ -220,9 +220,10 @@ defmodule LiveVueContract do
         LiveVueContract.Events.rendered(key)
         LiveVueContract.Coverage.record(:component, key)
         {props, streams} = props(assigns)
+        {props, skip} = changed(schema, props, assigns)
 
         schema
-        |> Map.update("required", [], &(&1 -- streams))
+        |> Map.update("required", [], &(&1 -- (streams ++ skip)))
         |> Schema.validate(LiveVue.Encoder.encode(props))
         |> LiveVueContract.Report.raise_or_warn!(
           ~s|props of <.vue v-component=#{inspect(name)}>|,
@@ -246,6 +247,22 @@ defmodule LiveVueContract do
   end
 
   def validate!(_assigns), do: :ok
+
+  # `{props to validate, names of required props not to report missing}`. On an update LiveView
+  # marks in `__changed__` the attributes whose value may differ from the last render; the others
+  # passed the check then and the schema has not changed, so only the changed ones are walked
+  # (a dashboard's props take tens of ms, re-checked on each of the dozens of renders that change
+  # one tile). A required prop absent now is still reported: it is not in `props` at all. On the
+  # first render, and wherever LiveView does not track changes, `__changed__` is nil: all of them.
+  defp changed(%{"type" => "object", "properties" => _} = schema, props, assigns)
+       when is_map(assigns.__changed__) do
+    changed = assigns.__changed__
+    {fresh, stale} = props |> Map.keys() |> Enum.split_with(&Map.has_key?(changed, &1))
+    stale = Enum.map(stale, &to_string/1)
+    {Map.take(props, fresh), Enum.filter(Map.get(schema, "required", []), &(&1 in stale))}
+  end
+
+  defp changed(_schema, props, _assigns), do: {props, []}
 
   # `{props to validate, names of props passed as LiveStreams}`: a stream is a delta, not the
   # value the TS type describes, so it is skipped rather than reported as missing.

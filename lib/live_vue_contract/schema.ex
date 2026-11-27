@@ -22,38 +22,43 @@ defmodule LiveVueContract.Schema do
   def path, do: Application.get_env(:live_vue_contract, :contract, "assets/vue/contract.json")
 
   @doc "All schemas keyed by component name; `%{}` when the file is absent."
-  def all, do: load() |> elem(0)
+  def all, do: load() |> elem(1)
 
   @doc "Named types the schemas refer to with `{\"$ref\": name}`."
-  def defs, do: load() |> elem(1)
+  def defs, do: load() |> elem(2)
 
   @doc """
   Events declared with `useLiveEvents<...>()`: event name -> list of variants
   `%{"payload" => schema, "reply" => schema | nil, "components" => [key], "declared" => [file]}`.
   One event name has several variants when components declare it with different types.
   """
-  def events, do: load() |> elem(2)
+  def events, do: load() |> elem(3)
 
+  # `{stamp, schemas, defs, events}`: the file is parsed again when its stamp changes (the
+  # generator rewrote it under a running dev server); `stamp` is nil when there is no file.
   defp load do
     path = path()
 
     case File.stat(path) do
-      {:ok, %{mtime: mtime}} ->
+      {:ok, %{mtime: mtime, size: size}} ->
+        stamp = {path, mtime, size}
+
         case :persistent_term.get({__MODULE__, path}, nil) do
-          {^mtime, schemas, defs, events} ->
-            {schemas, defs, events}
+          {^stamp, _schemas, _defs, _events} = loaded ->
+            loaded
 
           _ ->
             contract = path |> File.read!() |> JSON.decode!() |> Map.delete(@sources)
             {defs, contract} = Map.pop(contract, @defs, %{})
             {events, schemas} = Map.pop(contract, @events, %{})
 
-            :persistent_term.put({__MODULE__, path}, {mtime, schemas, defs, events})
-            {schemas, defs, events}
+            loaded = {stamp, schemas, defs, events}
+            :persistent_term.put({__MODULE__, path}, loaded)
+            loaded
         end
 
       _ ->
-        {%{}, %{}, %{}}
+        {nil, %{}, %{}, %{}}
     end
   end
 
@@ -73,6 +78,28 @@ defmodule LiveVueContract.Schema do
 
   @doc "Like `fetch/1`, with the contract key the name resolved to: `{:ok, key, schema}`."
   def resolve(name) do
+    # called on every render; matching the name against every key took 0.1 ms with 200
+    # components, so the answer is kept in the process (a LiveView renders the same names)
+    case load() do
+      {nil, schemas, _defs, _events} ->
+        resolve(name, schemas)
+
+      {stamp, schemas, _defs, _events} ->
+        key = {__MODULE__, :resolve, name}
+
+        case Process.get(key) do
+          {^stamp, resolved} ->
+            resolved
+
+          _ ->
+            resolved = resolve(name, schemas)
+            Process.put(key, {stamp, resolved})
+            resolved
+        end
+    end
+  end
+
+  defp resolve(name, schemas) do
     parts =
       name
       |> String.replace_suffix(".vue", "")
@@ -80,7 +107,7 @@ defmodule LiveVueContract.Schema do
       |> Enum.reject(&(&1 == "index"))
 
     matches =
-      for {key, schema} <- all(), suffix?(key_parts(key), parts), do: {key, schema}
+      for {key, schema} <- schemas, suffix?(key_parts(key), parts), do: {key, schema}
 
     case matches do
       [{key, schema}] -> {:ok, key, schema}
@@ -125,48 +152,44 @@ defmodule LiveVueContract.Schema do
   `:warn` (TypeScript is structural; the client just never reads it), everything else is `:error`.
   `defs` resolves `{"$ref": name}`; by default, the named types of the contract file.
   """
-  def validate(schema, value, defs \\ defs()), do: do_validate(schema, value, "", defs)
+  def validate(schema, value, defs \\ defs()) do
+    for {severity, path, message} <- check(schema, value, [], defs) do
+      {severity, format_path(path), format_message(message, defs)}
+    end
+  end
 
-  defp do_validate(%{"type" => "any"}, _v, _p, _d), do: []
+  # The walk runs on every render with big props, so it builds no strings: a path is a reversed
+  # list of segments, a message a tuple. Both are formatted only for the problems `validate/3`
+  # returns: a union tries every alternative and drops the losers' problems, and a message
+  # inspected eagerly for each of them cost more than the walk itself.
+  defp check(%{"type" => "any"}, _v, _p, _d), do: []
 
-  defp do_validate(%{"$ref" => name}, v, p, d) do
+  defp check(%{"$ref" => name}, v, p, d) do
     case Map.fetch(d, name) do
-      {:ok, schema} -> do_validate(schema, v, p, d)
+      {:ok, schema} -> check(schema, v, p, d)
       :error -> raise ArgumentError, "#{path()}: $ref #{inspect(name)} is not in $defs"
     end
   end
 
-  defp do_validate(%{"anyOf" => alts}, v, p, d) do
+  defp check(%{"anyOf" => alts}, v, p, d) do
     # the alternative with the fewest errors (then warnings) decides: none -> keep its warnings, some -> one union message
     # an alternative the value matched structurally (errors only inside) beats one it did not
     # match at all; then one whose literal keys agree with the value (`ok: false` picks
     # `{ ok: false; error: string }` out of a discriminated union); then fewer errors
-    best =
-      alts
-      |> Enum.map(&{&1, do_validate(&1, v, p, d)})
-      |> Enum.min_by(fn {alt, problems} ->
-        errors = Enum.filter(problems, &match?({:error, _, _}, &1))
-
-        # last, fewer unknown keys: `Partial<A> | Partial<B>` all match with no errors, the
-        # branch that declares the keys the value carries is the one meant
-        {Enum.any?(errors, fn {_, path, _} -> path == p end), discriminant_mismatch?(alt, v, d),
-         length(errors), length(problems) - length(errors)}
-      end)
-      |> elem(1)
-
-    if Enum.any?(best, &match?({:error, ^p, _}, &1)),
-      do: [{:error, p, "expected #{describe(%{"anyOf" => alts}, d)}, got #{short(v)}"}],
-      else: best
+    case check_alternatives(alts, v, p, d, []) do
+      [] -> []
+      tried -> pick_alternative(alts, tried, v, p, d)
+    end
   end
 
   # atoms other than nil/booleans go on the wire as strings
-  defp do_validate(%{"enum" => allowed}, v, p, _d) do
+  defp check(%{"enum" => allowed}, v, p, _d) do
     if wire(v) in allowed,
       do: [],
-      else: [{:error, p, "expected one of #{inspect(allowed)}, got #{short(v)}"}]
+      else: [{:error, p, {:one_of, allowed, v}}]
   end
 
-  defp do_validate(%{"type" => "object"} = s, %{} = v, p, d) do
+  defp check(%{"type" => "object"} = s, %{} = v, p, d) do
     v = Map.new(v, fn {k, val} -> {to_string(k), val} end)
     props = Map.get(s, "properties", %{})
     required = Map.get(s, "required", [])
@@ -174,7 +197,7 @@ defmodule LiveVueContract.Schema do
     missing =
       for k <- required,
           not Map.has_key?(v, k),
-          do: {:error, p <> "/" <> k, "missing required key"}
+          do: {:error, [k | p], :missing}
 
     # keys outside `properties`: checked against an index signature / Record value type when
     # there is one, otherwise a warning
@@ -186,7 +209,7 @@ defmodule LiveVueContract.Schema do
     nested =
       Enum.flat_map(props, fn {k, sub} ->
         case Map.fetch(v, k) do
-          {:ok, val} -> do_validate(sub, val, p <> "/" <> k, d)
+          {:ok, val} -> check(sub, val, [k | p], d)
           :error -> []
         end
       end)
@@ -194,23 +217,58 @@ defmodule LiveVueContract.Schema do
     missing ++ extra ++ nested
   end
 
-  defp do_validate(%{"type" => "array"} = s, v, p, d) when is_list(v) do
+  defp check(%{"type" => "array"} = s, v, p, d) when is_list(v) do
     items = Map.get(s, "items", %{"type" => "any"})
-
-    v
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {el, i} -> do_validate(items, el, "#{p}/#{i}", d) end)
+    check_items(v, items, 0, p, d)
   end
 
   # atoms other than nil/booleans go on the wire as strings
-  defp do_validate(%{"type" => "string"}, v, _p, _d)
+  defp check(%{"type" => "string"}, v, _p, _d)
        when is_binary(v) or (is_atom(v) and v not in [nil, true, false]),
        do: []
 
-  defp do_validate(%{"type" => "number"}, v, _p, _d) when is_number(v), do: []
-  defp do_validate(%{"type" => "boolean"}, v, _p, _d) when is_boolean(v), do: []
-  defp do_validate(%{"type" => "null"}, nil, _p, _d), do: []
-  defp do_validate(s, v, p, d), do: [{:error, p, "expected #{describe(s, d)}, got #{short(v)}"}]
+  defp check(%{"type" => "number"}, v, _p, _d) when is_number(v), do: []
+  defp check(%{"type" => "boolean"}, v, _p, _d) when is_boolean(v), do: []
+  defp check(%{"type" => "null"}, nil, _p, _d), do: []
+  defp check(s, v, p, _d), do: [{:error, p, {:expected, s, v}}]
+
+  defp check_items([], _items, _i, _p, _d), do: []
+
+  defp check_items([el | rest], items, i, p, d) do
+    case check(items, el, [i | p], d) do
+      [] -> check_items(rest, items, i + 1, p, d)
+      problems -> problems ++ check_items(rest, items, i + 1, p, d)
+    end
+  end
+
+  # `[]` as soon as one alternative matches cleanly (no problem can rank better), otherwise
+  # every alternative with its problems
+  defp check_alternatives([], _v, _p, _d, tried), do: Enum.reverse(tried)
+
+  defp check_alternatives([alt | rest], v, p, d, tried) do
+    case check(alt, v, p, d) do
+      [] -> []
+      problems -> check_alternatives(rest, v, p, d, [{alt, problems} | tried])
+    end
+  end
+
+  defp pick_alternative(alts, tried, v, p, d) do
+    best =
+      tried
+      |> Enum.min_by(fn {alt, problems} ->
+        errors = Enum.filter(problems, &match?({:error, _, _}, &1))
+
+        # last, fewer unknown keys: `Partial<A> | Partial<B>` all match with no errors, the
+        # branch that declares the keys the value carries is the one meant
+        {Enum.any?(errors, fn {_, path, _} -> path == p end), discriminant_mismatch?(alt, v, d),
+         length(errors), length(problems) - length(errors)}
+      end)
+      |> elem(1)
+
+    if Enum.any?(best, &match?({:error, ^p, _}, &1)),
+      do: [{:error, p, {:expected, %{"anyOf" => alts}, v}}],
+      else: best
+  end
 
   # an object alternative with a single-literal property (a union tag) the value disagrees with
   defp discriminant_mismatch?(%{"$ref" => name}, v, d),
@@ -231,9 +289,20 @@ defmodule LiveVueContract.Schema do
   defp wire(v), do: v
 
   defp extra_key(%{"additionalProperties" => sub}, k, val, p, d),
-    do: do_validate(sub, val, p <> "/" <> k, d)
+    do: check(sub, val, [k | p], d)
 
-  defp extra_key(_s, k, _val, p, _d), do: [{:warn, p <> "/" <> k, "key not in type"}]
+  defp extra_key(_s, k, _val, p, _d), do: [{:warn, [k | p], :not_in_type}]
+
+  defp format_path(path),
+    do: path |> Enum.reverse() |> Enum.map_join(&["/", to_string(&1)])
+
+  defp format_message(:missing, _d), do: "missing required key"
+  defp format_message(:not_in_type, _d), do: "key not in type"
+
+  defp format_message({:one_of, allowed, v}, _d),
+    do: "expected one of #{inspect(allowed)}, got #{short(v)}"
+
+  defp format_message({:expected, s, v}, d), do: "expected #{describe(s, d)}, got #{short(v)}"
 
   defp describe(%{"$ref" => name}, d), do: d |> Map.get(name, %{"type" => name}) |> describe(d)
   defp describe(%{"type" => t}, _d), do: t
@@ -242,5 +311,7 @@ defmodule LiveVueContract.Schema do
   defp describe(%{"anyOf" => a}, d),
     do: a |> Enum.map(&describe(&1, d)) |> Enum.uniq() |> Enum.join(" | ")
 
-  defp short(v), do: v |> inspect() |> String.slice(0, 60)
+  # a megabyte list in the wrong place is not inspected whole to show 60 characters of it
+  defp short(v),
+    do: v |> inspect(limit: 10, printable_limit: 60) |> String.slice(0, 60)
 end

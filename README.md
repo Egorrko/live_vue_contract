@@ -52,8 +52,9 @@ against it. Nothing is described a second time.
    counted in the template source, and a template where the walk found fewer is a `CompileError`, so a
    LiveView release that changes that form breaks the build instead of turning the check off.
 3. `LiveVueContract.vue/1` replaces `LiveVue.vue/1`. In dev and test it encodes the props exactly as
-   LiveVue would and validates them against the nested schema before rendering. In a release it is a
-   pass-through.
+   LiveVue would and validates them against the nested schema before rendering. On an update it
+   validates only the props LiveView marks as changed: a prop that did not change passed on an
+   earlier render. In a release it is a pass-through.
 
 ## Installation
 
@@ -204,6 +205,9 @@ the log is clean. `strict: true` turns "server sends a key the type does not kno
 
 - **Screens nobody renders in a test.** Nested-value checks (renamed key, wrong type) run at render
   time, so a root component without a live test gets only the compile-time attribute check.
+- **A value changed behind LiveView's back.** An update validates the props in `__changed__`; a
+  wrapper component that sets a prop with `Map.put` instead of `assign/3` hides the change from this
+  check, as it does from LiveVue's props diff.
 - **Values your tests never produce.** The render-time check sees the data the test rendered: a `nil`
   branch, a rare enum value or an empty list that only production data has goes unchecked. It is off
   in releases.
